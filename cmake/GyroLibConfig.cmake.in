@@ -1,0 +1,19 @@
+@PACKAGE_INIT@
+include(CMakeFindDependencyMacro)
+set(GyroLib_Core_FOUND TRUE)
+set(GyroLib_Steam_FOUND TRUE)
+set(GyroLib_SDL_FOUND @GL_BUILD_SDL@)
+set(GyroLib_Panel_FOUND @GL_BUILD_PANEL@)
+# Core consumers do not discover SDL. When this SDK was built with the vendored
+# package, its development files move with the SDK. Explicit SDL3_DIR settings
+# and a host's existing SDL targets keep their usual CMake precedence.
+if(GyroLib_SDL_FOUND AND NOT TARGET SDL3::SDL3 AND ("SDL" IN_LIST GyroLib_FIND_COMPONENTS OR
+        (NOT @GL_SINGLE_DLL@ AND NOT GyroLib_FIND_COMPONENTS)))
+    if(@gl_install_bundled_sdl@)
+        find_dependency(SDL3 3.2 CONFIG HINTS "@PACKAGE_gl_sdl_install_dir@/cmake")
+    else()
+        find_dependency(SDL3 3.2 CONFIG)
+    endif()
+endif()
+include("${CMAKE_CURRENT_LIST_DIR}/GyroLibTargets.cmake")
+check_required_components(GyroLib)

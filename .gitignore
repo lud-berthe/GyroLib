@@ -1,0 +1,70 @@
+# Local builds, SDK staging and dependency reconstruction.
+/build*/
+/out/
+/dist/
+/Debug/
+/Release/
+/x64/
+/x86/
+
+# CMake/Ninja output from an accidental in-source configuration.
+/CMakeCache.txt
+/CMakeFiles/
+/Testing/
+/cmake_install.cmake
+/install_manifest*.txt
+/Makefile
+/build.ninja
+/rules.ninja
+/.ninja_*
+/CMakeUserPresets.json
+/*.sln
+/*.vcxproj*
+/*.exe
+/*.dll
+/*.lib
+/*.a
+/*.so
+/*.so.*
+/*.dylib
+
+# IDE state and compiler intermediates. Vendored SDL DLLs/import libraries
+# are intentional dependencies: do not ignore *.dll or *.lib globally.
+/.vs/
+/.vscode/
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+*.obj
+*.o
+*.pdb
+*.ilk
+*.idb
+*.ipch
+*.pch
+*.exp
+
+# Runtime settings, captures and local logs; keep fixtures/assets publishable.
+girolib.ini
+imgui.ini
+/panel*.bmp
+/tps-*.bmp
+/demo*.bmp
+/*.log
+*.tmp
+*.bak
+*~
+
+# Local tools, credentials and OS caches.
+/.cache/
+/.codex/
+/.agents/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+Desktop.ini

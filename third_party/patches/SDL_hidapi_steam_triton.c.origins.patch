@@ -1,0 +1,39 @@
+diff --git a/src/joystick/hidapi/SDL_hidapi_steam_triton.c b/src/joystick/hidapi/SDL_hidapi_steam_triton.c
+index 01e4eff..de6114b 100644
+--- a/src/joystick/hidapi/SDL_hidapi_steam_triton.c
++++ b/src/joystick/hidapi/SDL_hidapi_steam_triton.c
+@@ -24,6 +24,7 @@
+ 
+ #include "../SDL_sysjoystick.h"
+ #include "SDL_hidapijoystick_c.h"
++#include "gyrolib_controls.h" /* Altered SDL: physical control origin metadata. */
+ 
+ #ifdef SDL_JOYSTICK_HIDAPI_STEAM_TRITON
+ 
+@@ -577,6 +578,26 @@ static bool HIDAPI_DriverSteamTriton_OpenJoystick(SDL_HIDAPI_Device *device, SDL
+ 
+     SDL_AssertJoysticksLocked();
+ 
++    GyroLibControlTopology(joystick, 3);
++    GyroLibButtonOrigin(joystick, 4, "Menu", 0, 0);
++    GyroLibButtonOrigin(joystick, 5, "Steam", 0, 0);
++    GyroLibButtonOrigin(joystick, 6, "View", 0, 0);
++    GyroLibButtonOrigin(joystick, 7, "L3", 0, 0);
++    GyroLibButtonOrigin(joystick, 8, "R3", 0, 0);
++    GyroLibButtonOrigin(joystick, 9, "L1", 0, 0);
++    GyroLibButtonOrigin(joystick, 10, "R1", 0, 0);
++    GyroLibButtonOrigin(joystick, 11, "Quick Access", 0, 0);
++    GyroLibButtonOrigin(joystick, 12, "R4", 0, 0);
++    GyroLibButtonOrigin(joystick, 13, "L4", 0, 0);
++    GyroLibButtonOrigin(joystick, 14, "R5", 0, 0);
++    GyroLibButtonOrigin(joystick, 15, "L5", 0, 0);
++    GyroLibButtonOrigin(joystick, 16, "Right touchpad click", 0, 0);
++    GyroLibButtonOrigin(joystick, 17, "Left touchpad click", 0, 0);
++    GyroLibButtonOrigin(joystick, 18, "R3 touch", 2, 0);
++    GyroLibButtonOrigin(joystick, 19, "L3 touch", 1, 0);
++    GyroLibButtonOrigin(joystick, 20, "Grip Sense R", 0, 2);
++    GyroLibButtonOrigin(joystick, 21, "Grip Sense L", 0, 1);
++    SDL_SetBooleanProperty(SDL_GetJoystickProperties(joystick), "gyrolib.output.right_pad_pulse", true);
+     // Initialize the joystick capabilities
+     joystick->nbuttons = SDL_GAMEPAD_NUM_TRITON_BUTTONS;
+     joystick->naxes = SDL_GAMEPAD_AXIS_COUNT;

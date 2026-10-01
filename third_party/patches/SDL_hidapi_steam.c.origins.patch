@@ -1,0 +1,27 @@
+diff --git a/src/joystick/hidapi/SDL_hidapi_steam.c b/src/joystick/hidapi/SDL_hidapi_steam.c
+index 41cf669..66c733b 100644
+--- a/src/joystick/hidapi/SDL_hidapi_steam.c
++++ b/src/joystick/hidapi/SDL_hidapi_steam.c
+@@ -25,6 +25,7 @@
+ #include "../../SDL_hints_c.h"
+ #include "../SDL_sysjoystick.h"
+ #include "SDL_hidapijoystick_c.h"
++#include "gyrolib_controls.h" /* Altered SDL: physical control origin metadata. */
+ 
+ #ifdef SDL_JOYSTICK_HIDAPI_STEAM
+ 
+@@ -1266,6 +1267,14 @@ static bool HIDAPI_DriverSteam_OpenJoystick(SDL_HIDAPI_Device *device, SDL_Joyst
+ 
+     InitializeSteamControllerPacketAssembler(&ctx->m_assembler, device->is_bluetooth);
+ 
++    GyroLibControlTopology(joystick, 1); /* One real stick; right axes are pad output. */
++    GyroLibButtonOrigin(joystick, 7, "Stick click", 0, 0);
++    GyroLibButtonOrigin(joystick, 8, "Right touchpad click", 0, 0);
++    GyroLibButtonOrigin(joystick, 9, "LB", 0, 0);
++    GyroLibButtonOrigin(joystick, 10, "RB", 0, 0);
++    GyroLibButtonOrigin(joystick, 11, "Right grip click", 0, 0);
++    GyroLibButtonOrigin(joystick, 12, "Left grip click", 0, 0);
++    GyroLibButtonOrigin(joystick, 5, "Steam", 0, 0);
+     // Initialize the joystick capabilities
+     joystick->nbuttons = SDL_GAMEPAD_NUM_STEAM_BUTTONS;
+     joystick->naxes = SDL_GAMEPAD_AXIS_COUNT;

@@ -1,0 +1,40 @@
+--- upstream/GamepadMotion.hpp
++++ third_party/GamepadMotion.hpp
+@@ -6,6 +6,7 @@
+ 
+ #define _USE_MATH_DEFINES
+ #include <math.h>
++#include <cmath> // local gravity-initialization extension
+ #include <algorithm> // std::min, std::max and std::clamp
+ 
+ // You don't need to look at these. These will just be used internally by the GamepadMotion class declared below.
+@@ -259,6 +260,10 @@
+ 	void SetCalibrationMode(GamepadMotionHelpers::CalibrationMode calibrationMode);
+ 
+ 	void ResetMotion();
++
++	// Returnal extension: seed orientation tracking once from a fresh accelerometer
++	// sample after a device reset. Does not calibrate gyro or integrate fictitious time.
++	bool InitializeGravityFromAcceleration(float x, float y, float z);
+ 
+ 	GamepadMotionSettings Settings;
+ 
+@@ -1276,6 +1281,18 @@
+ 	CurrentCalibrationMode = calibrationMode;
+ }
+ 
++inline bool GamepadMotion::InitializeGravityFromAcceleration(float x, float y, float z)
++{
++	if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return false;
++	const float magnitude = sqrtf(x*x + y*y + z*z);
++	if (!std::isfinite(magnitude) || magnitude < 0.05f || magnitude > 3.5f) return false;
++	Motion.Grav.Set(-x / magnitude, -y / magnitude, -z / magnitude);
++	Motion.SmoothAccel.Set(x, y, z);
++	Motion.Accel = Motion.SmoothAccel + Motion.Grav;
++	Motion.Shakiness = 0.f;
++	return true;
++}
++
+ inline void GamepadMotion::ResetMotion()
+ {
+ 	Motion.Reset();

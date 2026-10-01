@@ -1,0 +1,63 @@
+name: Windows
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: MSVC Release (${{ matrix.variant }})
+    runs-on: windows-2025
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [bundled, core-static]
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CMAKE_GENERATOR: Visual Studio 17 2022
+      GYROLIB_VARIANT: ${{ matrix.variant }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build and test
+        run: |
+          $buildArguments = @{ BuildDirectory = 'build-ci' }
+          if ($env:GYROLIB_VARIANT -eq 'core-static') {
+            $buildArguments.Static = $true
+            $buildArguments.CoreOnly = $true
+          }
+          & ./tools/build.ps1 @buildArguments
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Install and test a relocated SDK
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP 'gyrolib-sdk-stage'
+          $sdk = Join-Path $env:RUNNER_TEMP 'GyroLib SDK relocated'
+          cmake --install build-ci --config Release --prefix "$stage"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Rename-Item -LiteralPath $stage -NewName 'GyroLib SDK relocated'
+
+          # Build an independent consumer outside the checkout, using only the SDK.
+          $source = Join-Path $env:RUNNER_TEMP 'gyrolib-consumer-source'
+          $build = Join-Path $env:RUNNER_TEMP 'gyrolib-consumer-build'
+          Copy-Item -LiteralPath tests/install_consumer -Destination $source -Recurse
+          $extras = if ($env:GYROLIB_VARIANT -eq 'bundled') { 'ON' } else { 'OFF' }
+          cmake -S "$source" -B "$build" -A x64 "-DCMAKE_PREFIX_PATH=$sdk" `
+            "-DGL_CONSUMER_SDL=$extras" "-DGL_CONSUMER_PANEL=$extras" `
+            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build "$build" --config Release --parallel 4
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $env:PATH = (Join-Path $sdk 'bin') + ';' + $env:PATH
+          $env:GYROLIB_RUNTIME_CACHE = Join-Path $env:RUNNER_TEMP 'gyrolib-consumer-runtime'
+          ctest --test-dir "$build" -C Release --output-on-failure
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
