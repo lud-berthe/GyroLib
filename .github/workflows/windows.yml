@@ -21,7 +21,6 @@ jobs:
       run:
         shell: pwsh
     env:
-      CMAKE_GENERATOR: Visual Studio 17 2022
       GYROLIB_VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
