@@ -1,4 +1,4 @@
-// Adapted from ReturnalGyro (MIT), pure flick-stick processing.
+// GyroLib flick-stick processing (MIT).
 #pragma once
 #include <algorithm>
 #include <cmath>
@@ -31,7 +31,8 @@ public:
     bool feedback() const { return feedback_; }
     double process(float x,float y,double dt,bool safe,bool enabled,int mode,int ms,uint32_t context_id,bool profile_changed=false,bool touchpad=false,bool new_input=true,double report_dt=0) {
         feedback_=false;
-        if (!safe || !mode || !std::isfinite(dt) || dt<=0 || dt>0.1) { reset(); return 0; }
+        // Zero animation time still permits a newly received, delayed input edge.
+        if (!safe || !mode || !std::isfinite(dt) || dt<0 || dt>0.1) { reset(); return 0; }
         if (profile_changed || mode_!=mode || duration_ms_!=ms || context_id_!=context_id) {
             reset();mode_=mode;duration_ms_=ms;context_id_=context_id;
             condition_paused_=profile_changed;
@@ -66,7 +67,8 @@ public:
                 if (duration_==0) { result+=spin_; spin_=0; }
             } else if (edge_) {
                 const double turn=std::remainder(angle-angle_,360.0);angle_=angle;
-                if(options_.style!=1){const double speed=std::abs(turn)/(report_dt>0?report_dt:dt);
+                if(options_.style!=1){const double input_dt=report_dt>0?report_dt:dt;
+                    const double speed=input_dt>0?std::abs(turn)/input_dt:0;
                     const double direct=options_.smoothing_ms<=0||smoothing_speed<=0?1:
                         std::clamp((speed-smoothing_speed*.5)/(smoothing_speed*.5),0.0,1.0);
                     result+=turn*direct;pending_+=turn*(1-direct);}
@@ -82,7 +84,7 @@ public:
     }
     double pad_inner{.2},pad_outer{.35};
 };
-class ShortPressGate {
+class LongPressBlocker {
     bool held_{},cancelled_{},forwarded_{};
     uint64_t started_{};
 public:

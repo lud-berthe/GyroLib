@@ -1,21 +1,76 @@
 # GyroLib
 
-GyroLib turns controller motion into camera or local UI movement. It handles
-sensor acquisition, calibration, gyro spaces, sensitivity, smoothing and flick
-stick. Your game supplies its real view, focus, pause and menu states, then
-consumes angular movement in **degrees**. No engine hooks or game actions are
-created by the library.
+GyroLib is a C++ library for adding controller gyro to game mods. It provides a
+C API and a C++ wrapper, with a core independent of the game engine and renderer.
+Use the prebuilt `gyrolib.dll` or link the library statically into your mod.
 
-The core has a C ABI and a small C++ RAII interface. SDL acquisition, a borrowed
-Steam Input adapter and an ImGui settings panel are optional. Windows x64 is the
-tested platform; [validation and hardware limits](docs/VALIDATION.md) distinguish
-automated checks from controller acceptance.
+**Version 1.0.0.** Tested on Windows x64/MSVC.
+Linux and Proton remain unvalidated.
 
-## Build and install
+[Download SDK or demo](https://github.com/lud-berthe/GyroLib/releases/tag/v1.0.0)
+· [Release notes](docs/RELEASE_NOTES.md)
 
-The Windows build requires CMake 3.24+, Visual Studio C++ tools with C++20
-support, and **PowerShell 7** (`pwsh` on PATH). Windows PowerShell 5.1 does not
-replace `pwsh`. Dependencies are vendored; configuration performs no download.
+## What GyroLib handles
+
+- **Controller input:** discovery, capabilities, hotplug and motion-source
+  selection. SDL has priority; an optional Steam Input reader can supply a
+  fallback through the host's initialized Steam Input service.
+- **Motion:** gyro spaces, sensitivity, activation, calibration, smoothing,
+  acceleration and flick stick or touchpad rotation.
+- **View profiles:** separate settings for cameras and cursors, inheritance
+  between views and optional recommended presets supplied by the mod.
+- **Configuration:** saved settings, localized text, an ImGui panel and a shared
+  menu model for native game widgets.
+
+## What the mod connects
+
+Register the game's camera and cursor views, report which view is active and
+provide focus, pause and menu states. Each frame, pass input to GyroLib and apply
+its output to the active camera or cursor. Aiming comes from the game's resolved
+commands; GyroLib observes it and never triggers or changes it.
+
+Some features need additional integration: flick stick needs the game's native
+stick rotation suppressed, long-press blocking needs an action-filter hook, and
+camera recentering needs a host callback. The supplied panel needs rendering and
+window integration, or you can build a native menu from the public model.
+GyroLib does not install these hooks for you.
+
+## Get started
+
+Follow [First integration](docs/QUICKSTART.md) to compile a small host against the
+SDK. Then use the [integration guides](docs/INDEX.md#integrate-a-mod) to connect
+the frame loop, views, settings and menus in that order.
+
+The default Windows runtime layout is:
+
+```text
+game.exe
+my_mod.dll
+gyrolib.dll
+```
+
+GyroLib creates `gyrolib.ini` beside its DLL when the mod initializes settings.
+Bundled SDL and the optional sensor reader are extracted to a per-user cache;
+the reader runs in a separate process when needed. See
+[Distribution](docs/DISTRIBUTION.md) for packaging and the
+[license notices](docs/THIRD_PARTY.md) to include.
+
+## Try the demo
+
+Run `bin/gyrolib_demo.exe` from an installed SDK. The third-person shooting range
+demonstrates weapon aiming, a two-level sniper scope and an inventory cursor,
+each using view profiles. Open the gyro panel with **F10** or **Back + Start**
+(the equivalent buttons on your controller). The pause menu also includes a
+native gyro menu using the same settings.
+
+The [demo guide](docs/TPS_DEMO.md) lists controls and explains its integration.
+
+## Build from source
+
+You need CMake 3.24+, Visual Studio C++20 tools and PowerShell 7. Normal builds
+use the included dependencies and download nothing.
+
+To build the default Windows SDK from this checkout:
 
 ```powershell
 pwsh -NoProfile -File ./tools/build.ps1
@@ -23,109 +78,12 @@ cmake --install build --config Release --prefix dist/sdk
 ./dist/sdk/bin/gyrolib_demo.exe
 ```
 
-The default Windows SDK bundles acquisition in `gyrolib.dll`. A player's mod
-ships its own DLL, `gyrolib.dll` and the notices; the SDK and demo are development
-files. [Build variants and dependencies](docs/BUILDING.md) ·
-[Distribution](docs/DISTRIBUTION.md) · [Demo controls](docs/TPS_DEMO.md)
+[Building and linking](docs/BUILDING.md) covers SDK components, static and modular
+variants, and test commands.
 
-## First integration
+## Documentation
 
-Save this complete example as `main.cpp`. It opens a window and shows accumulated
-camera angles in its title. Close the window to exit. It has one camera view and
-no pause or menus, so those two states are explicitly false. A real game replaces
-these observations and the two angle additions with its own state and camera
-integration. GyroLib never guesses them.
-
-```cpp
-#include <gyrolib/gyrolib.hpp>
-#include <SDL3/SDL.h>
-#include <cstdio>
-#include <exception>
-#include <stdexcept>
-#include <string>
-
-int main() {
-    SDL_Window* window = nullptr;
-    bool sdl_ready = false;
-    int result = 0;
-    try {
-        gyrolib::Context gyro;
-        gyro.register_view(1, "Camera"); // Stable ID, also used for saved settings.
-        gyro.initialize_settings();    // Loads/creates girolib.ini beside the module.
-        gyrolib::SdlInput input(gyro);   // Destroyed before gyro, including on errors.
-        sdl_ready = true;
-        if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
-        window = SDL_CreateWindow("GyroLib", 640, 360, 0);
-        if (!window) throw std::runtime_error(SDL_GetError());
-
-        bool running = true;
-        double camera_yaw = 0, camera_pitch = 0;
-        std::string last_warning;
-        while (running) {
-            SDL_Event event;
-            while (SDL_PollEvent(&event)) {
-                if (event.type == SDL_EVENT_QUIT) running = false;
-            }
-            if (!running) break;
-            const uint64_t now = SDL_GetTicksNS();
-            input.poll(now, false); // Our SDL_PollEvent loop already pumps events.
-            if (last_warning != input.error()) {
-                last_warning = input.error();
-                if (!last_warning.empty()) std::fprintf(stderr, "%s\n", last_warning.c_str());
-            }
-
-            gl_host_state host{};
-            host.focused = (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0;
-            host.camera_allowed = 1; // This sample owns a controllable camera.
-            host.menu_open = host.paused = 0; // Read real game states in a mod.
-            const gl_output movement = gyro.update(now, host, 1);
-            camera_yaw += movement.yaw_degrees;
-            camera_pitch += movement.pitch_degrees; // Already integrated; no dt multiplier.
-            char title[128];
-            std::snprintf(title, sizeof(title), "Yaw %.2f / Pitch %.2f degrees", camera_yaw, camera_pitch);
-            SDL_SetWindowTitle(window, title);
-            SDL_Delay(8);
-        }
-    } catch (const std::exception& error) {
-        std::fprintf(stderr, "%s\n", error.what());
-        result = 1;
-    }
-    if (window) SDL_DestroyWindow(window);
-    if (sdl_ready) SDL_Quit();
-    return result;
-}
-```
-
-Use this `CMakeLists.txt` with the installed SDK:
-
-```cmake
-cmake_minimum_required(VERSION 3.24)
-project(MyGyroHost LANGUAGES CXX)
-find_package(GyroLib 0.2 CONFIG REQUIRED COMPONENTS SDL)
-add_executable(my_gyro_host main.cpp)
-target_link_libraries(my_gyro_host PRIVATE GyroLib::gyrolib_sdl)
-```
-
-Configure with `-DCMAKE_PREFIX_PATH=<absolute-sdk-directory>`, build, then place
-the installed `gyrolib.dll` beside the executable. The default Windows SDK includes
-the matching SDL headers, import library and CMake package; no source checkout or
-separate `SDL3_DIR` is needed. Its SDL component loads the bundled runtime.
-See [BUILDING.md](docs/BUILDING.md) for other variants and prerequisites.
-
-Keep all calls on one owner thread, also SDL's main thread. Declare readers
-**after** their context. Without a controller, acquisition succeeds and returns
-zero motion; asynchronous reader diagnostics remain available through `error()`.
-Without your own SDL loop, `input.update(now, host, active_view_id)` combines
-pumping, polling and processing. Pass view ID `0` when no view is known active.
-
-This example consumes returned movement. If you instead install a camera callback,
-that callback receives it during update: **do not apply the returned angles again**.
-
-## Go further
-
-- [API contracts, C integration, errors and C++ 0.2 migration](docs/API.md)
-- [Named views, priorities and settings migration](docs/CONTEXTS.md)
-- [Input ownership, Steam and physical controller identity](docs/INPUT.md)
-- [Gyro spaces and axes](docs/SPACES.md) · [Advanced motion](docs/ADVANCED_MOTION.md)
-- [Native settings menus and optional ImGui panel](docs/MENUS.md)
-- [Architecture](docs/ARCHITECTURE.md) · [Third-party notices](docs/THIRD_PARTY.md)
+- [Documentation index](docs/INDEX.md) — integration path and feature reference.
+- [Known limits](docs/LIMITS.md) — platform, hardware and integration constraints.
+- [Validation](docs/VALIDATION.md) — automated tests and real-controller results.
+- [SDK audit](docs/SDK_AUDIT.md) — findings, fixes and supporting evidence.

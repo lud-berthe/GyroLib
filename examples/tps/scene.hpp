@@ -12,8 +12,7 @@ namespace tps {
 inline ImU32 color(int r,int g,int b,int a=255){return IM_COL32(r,g,b,a);}
 struct Projector {
     V3 eye,right,up,forward;double focal;ImVec2 size;
-    Projector(const Host& h,ImVec2 viewport):eye(h.eye()),right{std::cos(h.yaw*rad),0,-std::sin(h.yaw*rad)},
-        up{-std::sin(h.yaw*rad)*std::sin(h.view_pitch()*rad),std::cos(h.view_pitch()*rad),-std::cos(h.yaw*rad)*std::sin(h.view_pitch()*rad)},
+    Projector(const Host& h,ImVec2 viewport):eye(h.eye()),right(h.right()),up(h.up()),
         forward(h.forward()),focal(viewport.y/(2*std::tan(h.fov()*rad/2))),size(viewport){}
     RenderVertex view(V3 point)const{
         const auto delta=point-eye;return {float(dot(delta,right)),float(dot(delta,up)),float(dot(delta,forward))};
@@ -71,14 +70,20 @@ struct Scene {
             SDL_SetTextureScaleMode(texture,SDL_SCALEMODE_LINEAR);
         }
         raster.begin(width,height,float(camera.focal),color(17,29,45),color(63,88,101));
-        for(int z=-14;z<46;z+=2)for(int x=-24;x<26;x+=2){
+        for(int z=-14;z<range_end+2;z+=2)for(int x=-18;x<18;x+=2){
             const bool stripe=x==0;const int checker=((x+z)/2)&1;
             quad({V3{double(x),-.02,double(z)},V3{double(x+2),-.02,double(z)},V3{double(x+2),-.02,double(z+2)},V3{double(x),-.02,double(z+2)}},
                 stripe?color(40,76,81):checker?color(42,54,67):color(46,59,71));
         }
-        box({0,0,43},{50,7,1},color(62,78,91));
-        box({-17,0,17},{1,4,50},color(66,82,92));box({17,0,17},{1,4,50},color(66,82,92));
-        for(int z=5;z<41;z+=9)for(double x:{-13.,13.}){
+        box({0,0,range_end},{2*range_side+2,range_wall_height,1},color(52,69,83));
+        for(double x:{-range_side,range_side})box({x,0,(range_start+range_end)/2},{1,4,range_end-range_start},color(66,82,92));
+        // Repeated range bands and edge lights make the longer lanes readable.
+        for(int z=0;z<range_end;z+=20){
+            quad({V3{-12,-.012,double(z)},V3{12,-.012,double(z)},V3{12,-.012,z+.14},V3{-12,-.012,z+.14}},color(158,139,93));
+            for(double x:{-16.45,16.45})box({x,3.5,double(z)+6},{.08,.12,8},color(53,192,179));
+        }
+        for(double y:{4.,8.})box({0,y,range_end-.53},{2*range_side,.10,.03},color(91,113,124));
+        for(int z=5;z<range_end;z+=18)for(double x:{-13.,13.}){
             box({x,0,double(z)},{1.2,5.5,1.2},color(92,110,118));
             box({x,4.7,double(z)-.63},{1.22,.28,.1},color(49,217,191));
         }
@@ -87,9 +92,21 @@ struct Scene {
             box(p+V3{0,1.15,0},{1.95,.12,1.45},color(193,139,63),.15);
         }
         for(const auto& target:host.targets){
-            // Fixed vertical disk at Z; the support stays physically behind it.
-            box({target.position.x,0,target.position.z+.20},{.14,1.5,.14},color(142,160,169));
-            box({target.position.x,0,target.position.z},{1.6,.09,.75},color(24,35,48));
+            // Rails, carriages and supports all remain behind the target disk.
+            const double top=target.origin.y+target.travel.y+.95,z=target.position.z+.28;
+            if(target.travel.x){
+                for(int side:{-1,1}){
+                    const double x=target.origin.x+side*(target.travel.x+.8);
+                    box({x,0,z},{.13,top,.13},color(83,105,117));
+                    box({x,0,z},{.65,.08,.7},color(24,35,48));
+                }
+                box({target.origin.x,top,z},{2*(target.travel.x+.8),.12,.18},color(120,142,148));
+                box({target.position.x,target.position.y,z},{.10,top-target.position.y,.1},color(118,148,153));
+            }else{
+                box({target.position.x,0,z},{.14,target.travel.y?top:target.position.y,.14},color(111,139,149));
+                box({target.position.x,0,z},{1.6,.09,.75},color(24,35,48));
+            }
+            box({target.position.x,target.position.y-.15,z-.04},{.3,.3,.19},color(47,190,170));
         }
         // Procedural third-person character: no game assets or engine dependency.
         // Hide the local body/weapon in the scope or when camera collision

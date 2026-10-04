@@ -1,228 +1,252 @@
-# Motion processing and advanced integration
+# Motion processing
 
-The F10 panel and the host-owned pause menu expose the same settings. Small + / -
-buttons to the left of Smoothing, Acceleration and Flick Stick expand their own options
-directly below the corresponding row. Groups open independently in each view;
-there is no combined Advanced section. The expanders and their children are
-hidden while the corresponding feature is Off. Retained expansion/preferences
-return when it is enabled again. Flick's options start with Spin Duration and
-only show stick/pad thresholds for the selected input (Either exposes both).
-Indented branch lines link child settings to their parent. Capability and camera/cursor restrictions
-still apply. Recenter is an ordinary camera row after Flick Stick.
-Native adapters can use `gl_setting_advanced_group(id)` (NONE, SMOOTHING,
-ACCELERATION, FLICK, HOLD_DISABLE; MODIFIERS is a reserved legacy group).
-Hold to disable has its own + for temporary inversion and
-trackball; the other activation modes do not expose that group.
-`gl_setting_is_advanced(id)` is true for these groups;
-recenter and optional zoom are ordinary rows. These hints do not affect processing.
-Each setting still has the normal localized metadata, events and automatic INI saving.
-Cursor views never expose flick, camera recenter or zoom compensation.
+[Documentation](INDEX.md) / Reference
 
-## Filtering and acceleration
+This guide explains each motion feature and the hooks it needs from the host.
+Gyro, activator and flick keys use the `context.<id>.` prefix; calibration is
+shared. [Gyro spaces](SPACES.md) defines projection, and [Menus](MENUS.md) covers
+presentation.
 
-The pipeline is: calibrated angular velocity -> selected gyro space -> adaptive
-smoothing -> tightening -> acceleration -> per-axis inversion -> optional host
-zoom compensation -> angular camera/cursor deltas. Flick is added afterwards.
+- [Gyro pipeline](#gyro-pipeline)
+- [Activation and modifiers](#activation-and-modifiers)
+- [Blocking long-press actions](#blocking-long-press-actions)
+- [Calibration](#calibration)
+- [Smoothing](#smoothing)
+- [Acceleration](#acceleration)
+- [Flick stick and right touchpad](#flick-stick-and-right-touchpad)
+- [Recenter camera](#recenter-camera)
+- [Zoom compensation](#zoom-compensation)
+- [References and tests](#references-and-tests)
 
-`gyro.smoothing_ms` retains its 0..500 ms range and 5 ms step. Zero bypasses it.
-Milliseconds are the exponential response time constant, not a fixed added delay
-or a sample count: a slow step reaches about 63% after one time constant. This
-unit stays meaningful at different update rates; fast inputs still bypass it.
-`gyro.smoothing_threshold_dps` defaults to 5 deg/s. Below half this threshold the
-whole input is filtered; above it new input is immediate. Intermediate speeds
-split continuously between direct and filtered paths. The filtered state always
-drains, including while fast inputs pass through, to preserve slow displacement.
-The exponential coefficient remains `-expm1(-dt/tau)`. We integrate its analytic
-interval mean, rather than the endpoint approximation, to conserve angular
-displacement at variable sample rates. Activation and view transitions clear
-filter history, without resetting orientation or calibration.
+## Gyro pipeline
 
-`gyro.tightening_dps` defaults to zero (off), range 0..10 deg/s. Below a nonzero
-threshold the vector is scaled by speed/threshold. Nonzero input remains nonzero:
-this is not a hard gyro dead zone. It changes the low-speed response intentionally.
-
-Acceleration Off/Low (1.5x)/Medium (2x)/High (3x) are presets that populate
-`gyro.fast_sensitivity_x/y` from the current main sensitivities, and set the start
-and full speeds to 5 and 75 deg/s. Off copies the main sensitivities to the fast
-values. Custom (value 4) is a derived current-value label after a detailed edit,
-not a selectable menu preset. Its choice metadata remains addressable for the
-label but has `available=0`; the numeric API and saved files retain value 4.
-All choices use the same curve, including Custom, with no
-separate preset algorithm. The curve uses main X/Y sensitivities for slow input,
-`gyro.fast_sensitivity_x/y` for
-fast input, and interpolates using `gyro.slow_threshold_dps` and
-`gyro.fast_threshold_dps` (defaults 5 and 75 deg/s). Equal or reversed thresholds
-produce a defined step at the slow threshold. Choose increasing thresholds for
-a gradual curve. Acceleration now measures the filtered/tightened vector.
-All sensitivities are absolute ratios. Main sensitivities remain 0..20. Fast
-sensitivities cover 0..60 in 0.05 steps so High at a 20x base remains exactly 60x;
-old preset output is not clipped by the editor. Changing the main sensitivities
-while a preset is selected refreshes its fast values and retains its selection.
-Editing any of the four detailed acceleration values selects Custom; an
-unchanged value does not. Selecting a preset again replaces those values. Each
-operation emits changes for the affected setting IDs and saves one complete
-configuration. Additional controls are shown for enabled presets or Custom.
-The numeric settings API can still edit saved curve values while the preset is Off.
-With acceleration selected, the main rows are labeled Slow Sensitivity X/Y.
-
-## Flick options
-
-The existing `flick.mode` selects Off, Stick, Touchpad or Either when supported.
-Advanced options apply equally to stick and right-touchpad processing:
-
-| Key after `context.<id>.` | Default | Meaning |
-|---|---|---|
-| `flick.duration_ms` | 150 | Spin duration, 0..1000 ms; first expanded Flick option |
-| `flick.style` | 0 | 0 pivot + circle, 1 pivot only, 2 circle only |
-| `flick.smoothing_ms` | 30 | Small circular changes are smoothed; 0 bypasses |
-| `flick.smoothing_threshold_dps` | 45 | Circular speed above which new input is direct, deg/s |
-| `flick.stick_release_threshold` | .65 | Stick returns inside this radius to rearm |
-| `flick.stick_start_threshold` | .9 | Stick reaches this radius to start a flick |
-| `flick.touchpad_release_threshold` | .2 | Right-pad contact returns inside this radius to rearm |
-| `flick.touchpad_start_threshold` | .35 | Right-pad contact reaches this radius to start a flick |
-| `flick.snap` | 0 | 0 free, 1 nearest 90-degree direction, 2 nearest 45-degree direction |
-| `flick.snap_strength` | 1 | Fraction applied toward the snapped direction, 0..1 |
-| `flick.forward_deadzone_degrees` | 0 | Initial directions within +/- this angle count as straight ahead |
-| `flick.duration_exponent` | 0 | Actual duration = configured duration * (abs(pivot)/180)^exponent |
-
-Snapping and forward tolerance affect only the initial pivot; circular motion
-still uses the actual stick/pad angle. Exponent 1 halves the duration of a 90-degree
-pivot compared with a 180-degree pivot. The default remains 150 ms and cubic
-ease-out. Circular smoothing has its own filter and does not use gyro smoothing.
-Its threshold is angular speed over actual control-report time, independent of
-the rendering cadence. The core queues up to 512 reports per endpoint and
-processes them chronologically; providers should submit every available report.
-The slow portion is an angular displacement distributed exponentially over time.
-Releasing the stick/pad completes the remaining angle, preserving the intended
-turn. This may produce a small final movement with high smoothing. Safety,
-view/source transitions discard the tail. Initial-pivot timing still advances
-between reports. Held-stick resume behavior remains unchanged. Start must be
-greater than release: setters adjust its paired threshold, while invalid INI
-pairs are rejected transactionally. The legacy degree-limit key remains readable
-but hidden; schema 13 converts its value to deg/s with a 30 Hz reference.
-
-## Temporary gyro modifiers
-
-Both menus place temporary inversion and trackball under the + beside Activation
-Mode when Hold to disable is selected. Each is an optional checkbox, disabled by
-default. They share the existing activation buttons, touch contacts, stick
-deflection and triggers; there is no additional command assignment. While an
-activator is held, checked behaviors replace the normal gyro suspension. With
-neither checked, the hold still disables gyro. Other activation modes retain
-these preferences but do not apply them. Both can be combined.
-
-| Key after `context.<id>.` | Default | Meaning |
-|---|---|---|
-| `activation.temporary_invert` | 0 | Invert gyro while an existing activator is held |
-| `gyro.temporary_invert_axes` | 2 | 0 horizontal, 1 vertical, 2 both |
-| `activation.trackball` | 0 | Retain gyro velocity while an existing activator is held |
-| `gyro.trackball_axes` | 2 | 0 horizontal, 1 vertical, 2 both |
-| `gyro.trackball_decay` | 1 | Half-lives per second; 0 preserves speed |
-
-Trackball remembers the preceding velocity using a 40 ms exponential average,
-then integrates its decay analytically at host update intervals. Unselected axes
-continue their normal gyro processing. Focus/source/view/safety transitions clear
-momentum. A held modifier never overrides gyro disabled, pause or calibration.
-Temporary inversion combines with the saved axis inversion and precedes optional
-zoom. Stick activation uses the ordinary activation family and its release
-hysteresis. There is no separate right-stick effect setting.
-The host can supply these modifiers and an activation override through the
-additive C API; it retains full ownership of game actions.
-
-## Lean spaces
-
-Public/persisted IDs 7 and 8 add Player Space Lean and World Space Lean. IDs 0..6
-are unchanged; Player Space stays the default. Lean projects rotation onto the
-gravity-relative roll axis. Player Lean uses local pitch and a 1.15 roll relaxation
-factor; World Lean uses gravity-relative pitch. Both fade horizontal response
-near a side-on singularity. These are additional Jibb-inspired options, not new
-claims about Steam Input conversion categories or measured equivalence.
-
-## Host camera actions
-
-Register `gl_set_recenter_callback(context, callback, user)` only when the adapter
-can center its own camera vertically. This reveals `camera.recenter_button`,
-with the same controller-specific button labels as activation. Default 0 is off.
-The DLL observes the configured button; it does not suppress that button's game
-action. The host can call `gl_request_recenter` for a keyboard/game action too.
-Requests run after the next update's camera delta, on the context owner thread,
-and are discarded while unfocused, paused, in menus or on a cursor view. Holding
-a button through a focus/view/controller transition cannot produce an extra edge.
-No gyro orientation reset, game aiming action or OS input is involved.
-
-For optional zoom scaling:
-
-```cpp
-gl_set_gameplay_context_zoom_available(gyro, aim_view_id, 1);
-// Before EACH gl_update, on the same owner thread:
-gl_set_gameplay_context_fov(gyro, aim_view_id, actual_vertical_fov, unzoomed_vertical_fov);
+```text
+calibrated angular velocity → gyro space → smoothing → tightening
+→ acceleration/sensitivity → inversion → optional zoom scale → angular deltas
 ```
 
-Both FOVs are finite degrees strictly between 0 and 179. The declaration reveals
-`gyro.zoom_compensation`, off by default. Enabling it scales gyro deltas by
-`tan(currentFov/2) / tan(referenceFov/2)`; it never scales flick. Missing/invalid
-reports or withdrawn support bypass scaling immediately. The saved per-view
-sensitivities remain unchanged. Use matching vertical projections and avoid
-applying another zoom scale in the camera hook. Changes in magnification do not
-constitute an aim command and never switch views themselves.
+Flick rotation is added separately. Output is already integrated in degrees.
+Ordinary activation/view changes preserve orientation and calibration while
+clearing filter history so old motion cannot leak into the new output.
 
-The demo supplies the recenter hook. Home or the configured controller button
-recenters the camera (R3 is the demo's initial binding). It does not declare zoom
-support or expose compensation: its separate standard/sniper views have their
-own sensitivities. The optional zoom API remains available for hosts with
-variable magnification within a view. Old saved demo zoom values are preserved
-but have no effect without declared host support and a fresh FOV report.
+## Activation and modifiers
 
-## Conservative automatic calibration
+Activation Mode offers Off, Always on, Hold to disable, Hold to enable and Toggle.
+Buttons, triggers, touchpad/stick/grip contacts and analog stick deflection can
+act as activators; enabled families combine with OR. Toggle's live state is shared
+across views using Toggle. [View transitions](CONTEXTS.md#transitions) defines edges
+and held-input behavior.
 
-Manual calibration is unchanged: five-second placement countdown followed by
-one second of accepted stillness windows. Steam samples receive no local bias.
-Menus-only calibration still excludes the active inventory cursor.
+Hold to disable can replace normal suspension with either or both modifiers:
 
-While gyro output is active outside a safe menu, automatic calibration now accepts
-only window means within 0.15 deg/s (vector magnitude) of the existing bias, and
-uses an eight-second correction time constant. Elsewhere it uses the existing
-two-second constant and noise-tolerant stillness detector. Larger drift during
-play requires manual calibration or a safe calibration interval. The synthetic
-2 deg/s steady-yaw case no longer gets absorbed while aiming. Very slow motion
-below the guard remains inherently ambiguous; disabling auto-calibration is still
-available and remains the default.
+| Key | Default | Meaning |
+|---|---|---|
+| `activation.temporary_invert` | 0 | Reverse selected gyro axes while an activator is held |
+| `gyro.temporary_invert_axes` | 2 | 0 horizontal, 1 vertical, 2 both |
+| `activation.trackball` | 0 | Continue remembered gyro velocity while held |
+| `gyro.trackball_axes` | 2 | 0 horizontal, 1 vertical, 2 both |
+| `gyro.trackball_decay` | 1 | Half-lives per second; 0 keeps speed |
 
-An adapter that knows the player is tracking a target can call
-`gl_set_auto_calibration_allowed(context, 0)` before each affected update.
-This is a per-update veto, automatically released after update; it does not
-cancel manual calibration or attempt to control Steam calibration.
+These use the existing activators, without another binding. Other activation
+modes retain but ignore their preferences. Trackball averages preceding velocity
+with a 40 ms exponential response and integrates decay at host update intervals.
+Unselected axes retain ordinary processing. Focus/source/view/safety transitions
+clear momentum. Neither modifier overrides Off, pause or calibration. Temporary
+inversion combines with saved inversion before zoom compensation.
 
-## Compatibility and validation
+The host can also supply modifiers and an activation override through the C API;
+it remains responsible for observing, rather than generating, game actions.
 
-Schema 15 preserves existing IDs, unknown keys and registered/retired
-view settings from schemas 1..14. Legacy `gyro.look_stick_effect` is retired:
-it has no processing effect, is hidden, cannot be set through the API and is
-omitted on save. Stick activators and explicit host activation overrides remain.
-Schema 14 replaced legacy `gyro.temporary_invert_button` and
-`gyro.trackball_button` assignments with the corresponding enable flags;
-existing activation commands, axes and decay remain unchanged. The retired
-bindings are hidden, cannot be set through the API and are omitted on save.
-Their behavior is now limited to Hold to disable. Older acceleration presets are materialized
-into their detailed values, preserving their output; Custom curves are retained.
-Schema 12 files whose detailed curve differs from the indicated preset are
-loaded as Custom (including manual INI edits). New options use their defaults. Existing
-nonzero smoothing now uses the adaptive policy; the saved duration is unchanged.
-Schema 16 replaces the enable checkbox with Activation Mode Off, retaining gyro
-preferences. Legacy disabled profiles migrate to Off; the old enable key is no
-longer written. Old loaders reject schema 16 rather than overwriting new settings. C ABI 1 structs
-remain unchanged; the extension consists of new functions and enum values.
+## Blocking long-press actions
 
-`advanced_motion` checks analytic time response, variable intervals, displacement,
-tightening, custom acceleration, Lean poses, flick modes/snapping/smoothing,
-calibration guards, camera callback gates, fresh FOV handling, metadata and migration.
-Core, native-menu, F10-help, combat and acquisition regressions run alongside it.
-These are synthetic/software checks, not a new real-controller acceptance test.
-Physical micro-aim, Steam circular smoothness, drift and end-to-end latency still
-need user testing. Linux/Proton remains untested.
+This optional filter separates a short game action from a held gyro activator.
+With a hold activation mode, an eligible individual button and
+`activation.block_long_press=1`:
 
-Algorithms were independently implemented from the mathematical descriptions in
+- Gyro reacts to the physical press immediately.
+- A release before 200 ms returns `GL_EMIT_TAP`; the host emits the game action.
+- Holding for 200 ms or longer suppresses that action.
+
+The mod must route the relevant press/repeat/release events through
+`gl_filter_event` and declare `GL_HOST_LONG_PRESS_BLOCKING` after wiring them.
+A camera callback cannot implement this feature. Do not filter aim or Alt-Fire.
+Suspend filtering for native interactions requiring a hold. The demo adapter in
+`examples/tps/controller_actions.hpp` preserves keyboard actions, trigger commands
+and UI navigation, and discards pending taps on focus loss or controller takeover.
+
+## Calibration
+
+Manual calibration gives five seconds to place the controller, then collects
+one second of accepted stillness with at least 20 samples. Movement restarts
+collection. Begin/Cancel actions and diagnostics expose countdown, stationarity
+and progress; no debug display is imposed.
+
+Automatic calibration defaults to Off. Any time needs no menu hook. Menus only
+requires `GL_HOST_MENU_STATE` and a trustworthy `host.menu_open`. Without that
+capability, the saved policy is retained but inactive, even with F10 open.
+
+With menu observation available, game menus and the library panel are eligible
+when still. An unpaused gyro-driven inventory cursor is excluded, even if its
+activator is released. Pausing or opening the library panel suspends the cursor
+and allows calibration again. An enabled menu camera is also excluded from idle
+menu calibration.
+
+Both paths use time-weighted gyro/acceleration statistics over 250 ms windows:
+
+| Test | Limit |
+|---|---|
+| Average angular speed | Below 3 deg/s |
+| Gyro noise | Below 0.9 deg/s RMS |
+| Acceleration | Near 1 g; noise below 0.025 g RMS |
+| Window mean relative to the initial stable window | Within 0.35 deg/s and 0.02 g |
+
+Large impulses cancel collection immediately; stream gaps clear its window.
+After one second of accepted windows, automatic bias correction uses a two-second
+time constant outside active gyro use. During active use outside a safe menu,
+only residual drift within 0.15 deg/s is accepted, with an eight-second constant.
+The host can veto automatic learning for one update with
+`gl_set_auto_calibration_allowed(context, 0)`; the veto then clears and does not
+cancel manual calibration.
+
+These checks do not add smoothing or a dead zone to output. Very slow intentional
+rotation remains indistinguishable from bias in some conditions. Larger drift
+requires manual calibration or a safe idle interval. Steam Input samples receive
+no local bias correction; its internal calibration remains outside this API.
+
+## Smoothing
+
+`gyro.smoothing_ms` is an exponential time constant: 0..500 ms in 5 ms steps.
+Zero bypasses both smoothing and its small-movement stabilization. A step reaches
+about 63% after one time constant; this is not a fixed delay or a sample count.
+
+The coefficient is `-expm1(-dt/tau)`. The processor integrates the analytic
+interval mean to conserve displacement at variable sample rates.
+`gyro.smoothing_threshold_dps` defaults to 5 deg/s: below half the threshold,
+all input is filtered; above it, new input passes directly. Between those speeds,
+the two paths blend continuously. The filter continues draining during fast motion.
+
+`gyro.tightening_dps` defaults to 0, range 0..10 deg/s. Below a nonzero threshold,
+it scales the vector by speed/threshold. It intentionally reduces small movement
+without imposing a hard dead zone. Its saved value is retained while smoothing
+is Off and resumes when smoothing is enabled.
+
+## Acceleration
+
+The main X/Y sensitivities are absolute ratios, from 0 to 20. When acceleration
+is enabled they describe slow movement; fast X/Y sensitivities range from 0 to 60
+in 0.05 steps. Speed is measured after smoothing and tightening.
+
+| Preset | Fast sensitivity | Start / full speed |
+|---|---|---|
+| Off | Same as main sensitivity; acceleration bypassed | 5 / 75 deg/s |
+| Low | Main × 1.5 | 5 / 75 deg/s |
+| Medium | Main × 2 | 5 / 75 deg/s |
+| High | Main × 3 | 5 / 75 deg/s |
+
+The curve interpolates from main sensitivities to `gyro.fast_sensitivity_x/y`
+between `gyro.slow_threshold_dps` and `gyro.fast_threshold_dps`. Equal or reversed
+thresholds produce a step at the slow threshold; increasing thresholds give a
+progressive curve.
+
+Selecting a preset populates those four advanced values. Changing main
+sensitivity under a preset refreshes its fast values. Editing an advanced value
+selects Custom, preserving the rest of the effective curve; an unchanged edit
+does not. Custom (value 4) is a current-value label, not a selectable preset.
+Selecting a preset again replaces the curve. Setters can edit curve values while
+Off, although its advanced menu is hidden.
+
+Each operation emits affected setting changes and saves one configuration.
+[Inheritance](INHERITANCE.md#acceleration-curves) explains local presets, derived
+values and restoring curve exceptions.
+
+## Flick stick and right touchpad
+
+`flick.mode` offers Off, Stick, Touchpad or Stick or Touchpad according to actual
+inputs and host suppression capabilities. A separately identified right touchpad
+qualifies; a central single pad does not. The host must suppress native camera
+rotation from each active flick input to prevent double movement.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `flick.duration_ms` | 150 | Pivot duration, 0..1000 ms, 5 ms steps |
+| `flick.style` | 0 | 0 pivot + circle, 1 pivot only, 2 circle only |
+| `flick.smoothing_ms` | 30 | Circular smoothing time; 0 bypasses |
+| `flick.smoothing_threshold_dps` | 45 | Circular speed above which new input is direct |
+| `flick.stick_release_threshold` | .65 | Radius inside which the stick rearms |
+| `flick.stick_start_threshold` | .9 | Radius that starts a stick flick |
+| `flick.touchpad_release_threshold` | .2 | Radius inside which the right pad rearms |
+| `flick.touchpad_start_threshold` | .35 | Radius that starts a pad flick |
+| `flick.snap` | 0 | 0 free, 1 nearest 90°, 2 nearest 45° direction |
+| `flick.snap_strength` | 1 | Fraction applied toward the snapped direction, 0..1 |
+| `flick.forward_deadzone_degrees` | 0 | Initial directions within ±this angle count as forward |
+| `flick.duration_exponent` | 0 | Duration × (abs(pivot)/180)^exponent |
+
+Snapping and forward tolerance affect only the initial pivot. Circular turning
+uses the actual input angle. Exponent 1 halves a 90° pivot's duration relative to
+180°. Pivots use cubic ease-out; duration 0 is immediate.
+
+Circular smoothing has its own filter, using angular speed over control-report
+time rather than render cadence. Providers should submit every report: the core
+queues up to 512 per endpoint and consumes fresh reports chronologically, once.
+Animation time advances between reports without replaying elapsed time when a
+late report arrives. Stick and pad histories remain separate.
+
+The slow circular portion is distributed exponentially. Releasing the input
+completes its remaining angle, which can produce a small final movement at high
+smoothing. Safety/view/source transitions discard that tail. Returning to a
+flick view with the stick already deflected skips the initial pivot and permits
+circular turning. Focus/menu interruptions and explicit setting changes require
+neutral before another pivot.
+
+Start must exceed release. Setters adjust the paired threshold; invalid independent
+INI pairs are rejected. Inherited combinations are resolved with a minimum 0.05
+gap. Circular smoothing thresholds use degrees per second.
+
+Optional right-pad feedback is dispatched explicitly through
+`gl_sdl_apply_feedback`. Its supported hardware and limitations are in
+[input acquisition](INPUT.md#touchpad-feedback).
+
+## Recenter camera
+
+Register `gl_set_recenter_callback(context, callback, user)` when the mod can
+center camera pitch. This exposes `camera.recenter_button`, default Off, using
+controller-specific labels. The host may also call `gl_request_recenter` for a
+keyboard or game action. The library does not suppress the button's normal action.
+
+The callback runs after camera deltas on the owner thread. Requests are discarded
+when unfocused, paused, on a cursor view, or in a menu unless that camera view
+explicitly permits menu output. Holding a button through a focus/view/controller
+transition cannot create an extra edge. Center the game camera, not gyro orientation.
+
+## Zoom compensation
+
+Declare variable zoom for a view and report its current projection before each update:
+
+```cpp
+check(gl_set_gameplay_context_zoom_available(gyro, aim_view_id, 1));
+// Before every gl_update:
+check(gl_set_gameplay_context_fov(gyro, aim_view_id, vertical_fov, reference_fov));
+```
+
+Both FOV values are finite degrees strictly between 0 and 179. The declaration
+exposes `gyro.zoom_compensation`, default Off. Enabled, it scales gyro deltas by
+`tan(currentFov/2) / tan(referenceFov/2)`, leaving flick and saved sensitivity
+unchanged. Missing/invalid reports or withdrawn support bypass scaling immediately.
+Use matching vertical projections and avoid applying another zoom scale in the
+camera hook. Reporting FOV does not select an aim view.
+
+The demo declares this only for Sniper: 20° reference and a second zoom at 10°.
+Its recommended profile enables compensation there. [Demo controls](TPS_DEMO.md)
+describes how to compare both levels.
+
+## References and tests
+
+Synthetic coverage includes time response, displacement, acceleration, flick,
+modifiers, calibration guards, recenter and FOV. See [validation](VALIDATION.md)
+for test commands and separate hardware observations.
+
+The independently implemented filters, flick options and Lean behavior follow
 Jibb Smart's [gyro guide](https://gyrowiki.jibbsmart.com/blog:good-gyro-controls-part-1:the-gyro-is-a-mouse),
 [flick guide](https://gyrowiki.jibbsmart.com/blog:good-gyro-controls-part-2:the-flick-stick)
 and [space guide](https://gyrowiki.jibbsmart.com/blog:player-space-gyro-and-alternatives-explained).
-Existing GamepadMotionHelpers MIT code and notices remain intact.
+GamepadMotionHelpers retains its MIT notice; see [provenance](THIRD_PARTY.md).

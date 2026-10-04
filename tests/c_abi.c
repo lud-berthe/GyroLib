@@ -1,4 +1,7 @@
 #include <gyrolib/gyrolib.h>
+#ifdef GL_OVERLAY_DX12
+#include <gyrolib/overlay.h>
+#endif
 #include <stddef.h>
 #include <stdio.h>
 _Static_assert(sizeof(gl_vec3)==12,"C ABI vector layout");
@@ -12,6 +15,9 @@ _Static_assert(sizeof(gl_touchpad_feedback)==24,"Additional C ABI touchpad feedb
 _Static_assert(sizeof(gl_trigger_input)==24,"Additional trigger ABI layout");
 _Static_assert(sizeof(gl_gyro_state)==16,"Additional activity ABI layout");
 _Static_assert(sizeof(gl_input_metrics)==48,"Additional metrics ABI layout");
+_Static_assert(sizeof(gl_event)==72,"Original event ABI unchanged");
+_Static_assert(sizeof(gl_event_ex)==152,"Extended event ABI layout");
+_Static_assert(offsetof(gl_event_ex,setting_id)==24,"Extended event key offset");
 int main(void) {
     gl_context* c=gl_create(GL_ABI_VERSION);gl_setting_info info;gl_host_state host={0};gl_output out;
     if(!c||gl_abi_version()!=GL_ABI_VERSION)return 1;
@@ -28,6 +34,8 @@ int main(void) {
     if(gl_get_settings_save_result(c)!=GL_UNAVAILABLE)return 19;
     if(gl_get_menu_key(c)!=10||gl_set_menu_key(c,24)!=GL_OK||gl_get_menu_key(c)!=24)return 20;
     if(gl_set_menu_key(c,0)!=GL_OK||gl_get_menu_key(c)!=0||gl_set_menu_key(c,25)!=GL_INVALID)return 21;
+    if(!gl_get_gamepad_menu_shortcut(c)||gl_set_gamepad_menu_shortcut(c,0)!=GL_OK||gl_get_gamepad_menu_shortcut(c))return 26;
+    if(gl_set_gamepad_menu_shortcut(c,2)!=GL_INVALID)return 27;
     if(gl_initialize_settings(NULL,NULL,NULL)!=GL_INVALID||*gl_get_settings_path(c))return 22;
     if(gl_get_selected_device(c)!=0||gl_get_output_target(c)!=GL_OUTPUT_CAMERA)return 12;
     if(gl_set_output_target(c,GL_OUTPUT_CURSOR)!=GL_OK||gl_get_output_target(c)!=GL_OUTPUT_CURSOR)return 13;
@@ -36,13 +44,16 @@ int main(void) {
         gl_gameplay_context mode={57,"Host C mode","Resolved command",20};double x=0;gl_choice choice;
         if(gl_register_gameplay_context(c,&mode)!=GL_OK)return 5;
         if(gl_set_gameplay_context_output_target(c,57,GL_OUTPUT_CAMERA)!=GL_OK)return 18;
+        if(gl_set_gameplay_context_camera_in_menu(c,57,1)!=GL_OK)return 26;
+        if(gl_set_gameplay_context_camera_in_menu(c,57,0)!=GL_OK)return 27;
         gl_menu_tab tab;
         if(gl_menu_tab_count(c)!=1||gl_menu_tab_at(c,0,&tab)!=GL_OK||tab.id!=58||tab.context_id!=57)return 6;
-        if(gl_menu_shared_setting_count(c)!=6||gl_menu_shared_setting_at(c,0,&info)!=GL_OK)return 17;
+        if(gl_menu_shared_setting_count(c)!=7||gl_menu_shared_setting_at(c,0,&info)!=GL_OK)return 17;
         if(gl_menu_setting_count(c)!=gl_setting_count()+gl_menu_tab_setting_count(c,58))return 15;
         if(gl_menu_tab_setting_at(c,58,0,&info)!=GL_OK)return 16;
         if(gl_setting_set(c,"context.57.sensitivity_x",3.2)!=GL_OK)return 7;
         if(gl_setting_get(c,"context.57.sensitivity_x",&x)!=GL_OK||x!=3.2)return 8;
+        if(gl_setting_get_effective(c,"context.57.sensitivity_x",&x)!=GL_OK||x!=3.2)return 28;
         if(gl_menu_choice_count(c,"gyro.context")!=2)return 9;
         if(gl_set_gameplay_context_state(c,57,1,1)!=GL_OK)return 10;
         if(gl_choice_at(c,"gyro.context",1,&choice)!=GL_OK||choice.value!=57||!choice.available)return 11;

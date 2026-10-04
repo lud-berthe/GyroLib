@@ -80,7 +80,15 @@ static void world_gravity_direction(){
     }
 }
 static void tightening_and_acceleration(){
-    Fixture f;f.set("gyro.tightening_dps",10);auto out=f.tick({3,4,0});near(out.yaw_degrees,-.02);near(out.pitch_degrees,.015);
+    Fixture f;f.set("gyro.tightening_dps",10);
+    auto out=f.tick({3,4,0});near(out.yaw_degrees,-.04);near(out.pitch_degrees,.03);
+    CHECK(!f.info("gyro.tightening_dps").visible);
+    f.set("gyro.smoothing_ms",50);f.set("gyro.smoothing_threshold_dps",0);
+    CHECK(f.info("gyro.tightening_dps").visible);
+    out=f.tick({3,4,0});near(out.yaw_degrees,-.02);near(out.pitch_degrees,.015);
+    f.set("gyro.smoothing_ms",0);out=f.tick({3,4,0});near(out.yaw_degrees,-.04);near(out.pitch_degrees,.03);
+    near(f.info("gyro.tightening_dps").value,10);
+    f.set("gyro.smoothing_ms",50);
     CHECK(f.tick({0,.001f,0}).yaw_degrees<0); // no cutoff
     f.set("gyro.tightening_dps",0);f.set("gyro.acceleration",4);
     f.set("gyro.fast_sensitivity_x",5);f.set("gyro.fast_sensitivity_y",8);
@@ -121,9 +129,9 @@ static void acceleration_presets(){
             f.set("gyro.acceleration",preset);f.set(key,f.info(key).value+f.info(key).step);near(f.info("gyro.acceleration").value,4);
         }
     }
-    const auto file=std::filesystem::temp_directory_path()/"gyrolib-preset-migration.ini";
+    const auto file=std::filesystem::temp_directory_path()/"gyrolib-preset-persistence.ini";
     Fixture f;
-    {std::ofstream out(file);out<<"schema=11\ncontext.1.sensitivity_x=20\ncontext.1.sensitivity_y=2.5\ncontext.1.gyro.acceleration=3\ncontext.1.gyro.fast_sensitivity_x=5\ncontext.1.gyro.fast_threshold_dps=20\nfuture.preference=keep\n";}
+    {std::ofstream out(file);out<<"schema=0.2.0\ncontext.1.sensitivity_x=20\ncontext.1.sensitivity_y=2.5\ncontext.1.gyro.acceleration=3\ncontext.1.gyro.fast_sensitivity_x=60\ncontext.1.gyro.fast_sensitivity_y=7.5\ncontext.1.gyro.fast_threshold_dps=75\nfuture.preference=keep\n";}
     CHECK(gl_load_settings(f.c,file.string().c_str())==GL_OK);
     near(f.info("gyro.fast_sensitivity_x").value,60);near(f.info("gyro.fast_threshold_dps").value,75);
     near(f.tick({0,75,0}).yaw_degrees,-45);
@@ -133,12 +141,12 @@ static void acceleration_presets(){
     restored.set("gyro.slow_threshold_dps",12);near(restored.info("gyro.acceleration").value,4);
     Fixture custom;CHECK(gl_load_settings(custom.c,file.string().c_str())==GL_OK);
     near(custom.info("gyro.acceleration").value,4);near(custom.info("gyro.slow_threshold_dps").value,12);
-    {std::ofstream out(file);out<<"schema=12\ncontext.1.gyro.acceleration=1\ncontext.1.gyro.fast_sensitivity_x=8\n";}
+    {std::ofstream out(file);out<<"schema=0.2.0\ncontext.1.gyro.acceleration=1\ncontext.1.gyro.fast_sensitivity_x=8\n";}
     CHECK(gl_load_settings(custom.c,file.string().c_str())==GL_OK);near(custom.info("gyro.acceleration").value,4);
     near(custom.info("gyro.fast_sensitivity_x").value,8);
-    {std::ofstream out(file);out<<"schema=11\ncontext.1.gyro.acceleration=4\ncontext.1.gyro.fast_sensitivity_y=12.3\n";}
+    {std::ofstream out(file);out<<"schema=0.2.0\ncontext.1.gyro.acceleration=4\ncontext.1.gyro.fast_sensitivity_y=12.3\n";}
     CHECK(gl_load_settings(custom.c,file.string().c_str())==GL_OK);
-    near(custom.info("gyro.fast_sensitivity_x").value,5);near(custom.info("gyro.fast_sensitivity_y").value,12.3);
+    near(custom.info("gyro.fast_sensitivity_x").value,2.5);near(custom.info("gyro.fast_sensitivity_y").value,12.3);
     std::filesystem::remove(file);
 }
 static void lean_spaces(){
@@ -250,24 +258,24 @@ static void combined_axis_inversion(){
     }
     const auto file=std::filesystem::temp_directory_path()/"gyrolib-yaw-roll-inversion.ini";
     for(int invert:{0,1})for(double contribution:{-50.,100.}){
-        {std::ofstream out(file);out<<"schema=16\ncontext.1.gyro.space=4\ncontext.1.sensitivity_x=2\ncontext.1.sensitivity_y=3\n"
+        {std::ofstream out(file);out<<"schema=0.2.0\ncontext.1.gyro.space=4\ncontext.1.sensitivity_x=2\ncontext.1.sensitivity_y=3\n"
             <<"context.1.gyro.acceleration=0\ncontext.1.gyro.fast_sensitivity_x=2\ncontext.1.gyro.fast_sensitivity_y=3\n"
-            <<"context.1.gyro.invert_x="<<invert<<"\ncontext.1.gyro.invert_y=1\ncontext.1.gyro.local_roll_percent="<<contribution<<"\nhost.preference=keep\n";}
-        Fixture migrated;CHECK(gl_load_settings(migrated.c,file.string().c_str())==GL_OK);
-        near(migrated.info("gyro.invert_roll").value,invert);
-        const auto out=migrated.tick({8,20,30});near(out.yaw_degrees,(-20+30*contribution/100)*2*.01*(invert?-1:1));
+            <<"context.1.gyro.invert_x="<<invert<<"\ncontext.1.gyro.invert_roll="<<invert<<"\ncontext.1.gyro.invert_y=1\ncontext.1.gyro.local_roll_percent="<<contribution<<"\nhost.preference=keep\n";}
+        Fixture configured;CHECK(gl_load_settings(configured.c,file.string().c_str())==GL_OK);
+        near(configured.info("gyro.invert_roll").value,invert);
+        const auto out=configured.tick({8,20,30});near(out.yaw_degrees,(-20+30*contribution/100)*2*.01*(invert?-1:1));
         near(out.pitch_degrees,-.24);
-        migrated.set("gyro.invert_x",1);migrated.set("gyro.invert_roll",0); // deliberately different
-        CHECK(gl_save_settings(migrated.c,file.string().c_str())==GL_OK);
+        configured.set("gyro.invert_x",1);configured.set("gyro.invert_roll",0); // deliberately different
+        CHECK(gl_save_settings(configured.c,file.string().c_str())==GL_OK);
         {std::ifstream in(file);const std::string text((std::istreambuf_iterator<char>(in)),{});
-            CHECK(text.find("schema=17")!=std::string::npos&&text.find("host.preference=keep")!=std::string::npos);}
+            CHECK(text.find("schema=0.2.0")!=std::string::npos&&text.find("host.preference=keep")!=std::string::npos);}
         Fixture restored;CHECK(gl_load_settings(restored.c,file.string().c_str())==GL_OK);
         near(restored.info("gyro.invert_x").value,1);near(restored.info("gyro.invert_roll").value,0);
         restored.set("gyro.space",GL_SPACE_PLAYER);restored.set("gyro.space",GL_SPACE_LOCAL_YAW_ROLL);
         near(restored.info("gyro.invert_roll").value,0);gl_reset_settings(restored.c);near(restored.info("gyro.invert_roll").value,0);
     }
-    // An explicit new inversion in an old-schema INI is also respected.
-    {std::ofstream out(file);out<<"schema=16\ncontext.1.gyro.invert_x=1\ncontext.1.gyro.invert_roll=0\n";}
+    // Explicit independent inversions are respected in partial files.
+    {std::ofstream out(file);out<<"schema=0.2.0\ncontext.1.gyro.invert_x=1\ncontext.1.gyro.invert_roll=0\n";}
     Fixture explicit_roll;CHECK(gl_load_settings(explicit_roll.c,file.string().c_str())==GL_OK);
     near(explicit_roll.info("gyro.invert_roll").value,0);
     std::filesystem::remove(file);
@@ -367,7 +375,7 @@ static void camera_hooks(){
     gl_set_gameplay_context_zoom_available(f.c,1,0);CHECK(!f.info("gyro.zoom_compensation").visible);
     gl_set_recenter_callback(f.c,nullptr,nullptr);CHECK(!f.info("camera.recenter_button").visible);
 }
-static void metadata_and_migration(){
+static void metadata_and_persistence(){
     Fixture f;CHECK(gl_setting_is_advanced("context.1.gyro.tightening_dps"));CHECK(!gl_setting_is_advanced("unknown"));
     CHECK(gl_setting_advanced_group("context.1.gyro.tightening_dps")==GL_ADVANCED_SMOOTHING);
     CHECK(gl_setting_advanced_group("context.1.gyro.fast_sensitivity_y")==GL_ADVANCED_ACCELERATION);
@@ -402,12 +410,12 @@ static void metadata_and_migration(){
                 CHECK(std::strcmp(choice.label,"?"));if(gl_setting_is_advanced(s.id)&&s.type==GL_SETTING_ENUM)CHECK(*gl_choice_description(f.c,s.id,choice.value));}
         }
     }
-    const auto file=std::filesystem::temp_directory_path()/"gyrolib-advanced-migration.ini";
-    {std::ofstream out(file);out<<"schema=10\nui.menu_key=\ncontext.1.sensitivity_x=7.2\ncontext.1.gyro.smoothing_ms=85\ncustom.host=keep\n";}
+    const auto file=std::filesystem::temp_directory_path()/"gyrolib-advanced-persistence.ini";
+    {std::ofstream out(file);out<<"schema=0.2.0\nui.menu_key=\ncontext.1.sensitivity_x=7.2\ncontext.1.gyro.smoothing_ms=85\ncustom.host=keep\n";}
     CHECK(gl_load_settings(f.c,file.string().c_str())==GL_OK);near(f.info("sensitivity_x").value,7.2);near(f.info("gyro.smoothing_ms").value,85);
     f.set("gyro.tightening_dps",.35);f.set("gyro.space",GL_SPACE_PLAYER_LEAN);f.set("flick.snap",2);
     Fixture loaded;CHECK(gl_load_settings(loaded.c,file.string().c_str())==GL_OK);near(loaded.info("gyro.tightening_dps").value,.35);near(loaded.info("flick.snap").value,2);
-    CHECK(gl_get_menu_key(loaded.c)==0);std::ifstream in(file);std::string data((std::istreambuf_iterator<char>(in)),{});CHECK(data.find("schema=17")!=std::string::npos&&data.find("custom.host=keep")!=std::string::npos);
+    CHECK(gl_get_menu_key(loaded.c)==0);std::ifstream in(file);std::string data((std::istreambuf_iterator<char>(in)),{});CHECK(data.find("schema=0.2.0")!=std::string::npos&&data.find("custom.host=keep")!=std::string::npos);
     in.close();std::filesystem::remove(file);
 }
 int main(){try{
@@ -417,6 +425,6 @@ int main(){try{
     run("lean spaces",lean_spaces);run("space axes and inversions",space_axes_and_inversions);
     run("Yaw + Roll independent inversions",combined_axis_inversion);
     run("laser ray geometry",laser_ray_geometry);run("flick options",flick_options);run("calibration guard",calibration_guard);
-    run("camera hooks",camera_hooks);run("metadata and migration",metadata_and_migration);
+    run("camera hooks",camera_hooks);run("metadata and persistence",metadata_and_persistence);
     std::cout<<"Advanced motion: 12 synthetic regression groups passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

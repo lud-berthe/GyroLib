@@ -5,7 +5,7 @@
 namespace tps {
 // The demo uses SDL's normalized button indices. A real mod maps its own
 // command events to these bindings instead; no system input is injected.
-enum { ButtonSouth=0,ButtonEast=1,ButtonWest=2,ButtonNorth=3,ButtonStart=6 };
+enum { ButtonSouth=0,ButtonEast=1,ButtonWest=2,ButtonNorth=3,ButtonBack=4,ButtonStart=6 };
 class ControllerActions {
     uint64_t device_{};
     uint32_t held_{};

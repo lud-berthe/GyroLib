@@ -74,7 +74,7 @@ extern "C" __declspec(dllexport) int mod_smoke(const char* mode){
         CHECK(CreateProcessW(sensor.executable.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,
             directory.c_str(),&startup,&child));CloseHandle(child.hThread);
     }
-    gyrolib_sensor::Record record{};size_t received{};const auto deadline=GetTickCount64()+5000;
+    gyrolib_sensor::Record record{};size_t received{};const auto deadline=GetTickCount64()+10000;
     while(received<sizeof(record)&&GetTickCount64()<deadline){
         received+=sensor_desktop_read(sensor,reinterpret_cast<char*>(&record)+received,sizeof(record)-received);Sleep(1);
     }

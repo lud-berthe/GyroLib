@@ -46,6 +46,7 @@ void scripted_events(unsigned frame,int w,int h,bool keep_inventory=false){
     if(frame==50||frame==55||frame==59)button(SDL_BUTTON_LEFT,true);
     if(frame==51||frame==56||frame==60)button(SDL_BUTTON_LEFT,false);
     if(!keep_inventory&&frame==67)button(SDL_BUTTON_RIGHT,true);
+    if(!keep_inventory&&frame==69)key(SDL_SCANCODE_V);
     if(frame==70)button(SDL_BUTTON_RIGHT,false);
     if(frame==72||frame==85)key(SDL_SCANCODE_F10);
     if(frame==92||frame==96)key(SDL_SCANCODE_ESCAPE);
@@ -83,13 +84,11 @@ int main(int argc,char** argv){
     if(occlusion){host.player={-6.85,0,0};host.pitch=-6;host.targets[0].position={-6,.72,8};}
     DemoInputLog input_log;
     if(!scripted){
-        // Keep diagnostics here; import old preferences only if girolib.ini is absent.
-        std::string legacy;
+        // Diagnostics use the per-user folder; settings live beside GyroLib.
         const char* pref=SDL_GetPrefPath("GyroLib","TPSDemo");
-        if(pref){legacy=std::string(pref)+"settings.ini";
-            if(!synthetic)input_log.open(context.get(),std::string(pref)+"input-diagnostics.log");}
-        if(gl_initialize_settings(context.get(),nullptr,legacy.c_str())!=GL_OK){
-            host.notification="Could not load or create girolib.ini";host.notification_time=8;}
+        if(pref&&!synthetic)input_log.open(context.get(),std::string(pref)+"input-diagnostics.log");
+        if(gl_initialize_settings(context.get(),nullptr,nullptr)!=GL_OK){
+            host.notification="Could not load or create gyrolib.ini";host.notification_time=8;}
     }
     auto* reader=synthetic?nullptr:gl_sdl_create(context.get(),1);
     if(!synthetic&&!reader){std::cerr<<SDL_GetError();return 2;}
@@ -105,7 +104,7 @@ int main(int argc,char** argv){
     std::array<bool,SDL_SCANCODE_COUNT> keys{};bool mouse_aim=false,mouse_fire=false,running=true,relative=false,cursor_hidden=false;
     bool previous_fire=false;SDL_JoystickID previous_pad=0;
     uint64_t previous_time=SDL_GetTicksNS();unsigned frame=0;int result=0;
-    double explore_delta=0,aim_delta=0,sniper_delta=0,inventory_yaw=0,inventory_pitch=0;unsigned inventory_callbacks=0;
+    double explore_delta=0,aim_delta=0,sniper_delta=0,sniper_zoom_delta=0,inventory_yaw=0,inventory_pitch=0;unsigned inventory_callbacks=0;
     bool saw_inventory=false,saw_selection=false,saw_pistol=false,saw_shotgun=false,saw_pause=false,saw_settings=false,saw_return=false;
     while(running){
         int w=0,h=0;SDL_GetWindowSize(window,&w,&h);if(scripted)scripted_events(frame,w,h,cursor_settings);
@@ -125,6 +124,7 @@ int main(int argc,char** argv){
                     else if(code==SDL_SCANCODE_RETURN)input.confirm_press=true;
                     else if(code==SDL_SCANCODE_R)input.reload_press=true;
                     else if(code==SDL_SCANCODE_HOME)input.recenter_press=true;
+                    else if(code==SDL_SCANCODE_V)input.zoom_press=true;
                 }
             }
             if(event.type==SDL_EVENT_MOUSE_BUTTON_DOWN||event.type==SDL_EVENT_MOUSE_BUTTON_UP){
@@ -135,6 +135,7 @@ int main(int argc,char** argv){
                 if(host.inventory){input.pointer_moved=true;input.pointer_x=event.motion.x/std::max(w,1);input.pointer_y=event.motion.y/std::max(h,1);}
                 else if(relative&&!host.paused){input.mouse_yaw+=event.motion.xrel*.12;input.mouse_pitch-=event.motion.yrel*.12;}
             }
+            if(event.type==SDL_EVENT_MOUSE_WHEEL&&event.wheel.y!=0)input.zoom_press=true;
         }
         const uint64_t now=scripted?1000000000ull+frame*16666667ull:SDL_GetTicksNS();
         const double dt=scripted?1.0/60:std::clamp((now-previous_time)*1e-9,0.0,.05);previous_time=now;
@@ -165,6 +166,11 @@ int main(int argc,char** argv){
         if(combat_capture&&frame==11){const auto eye=host.eye();host.targets[0].position={eye.x,1.7,6};
             host.pitch=std::atan2(1.7-eye.y,6-eye.z)/tps::rad;input.fire_press=true;}
         if(combat_capture&&frame==(preview_weapon==tps::Shotgun?33u:13u))input.reload_press=true;
+        if(capture&&!cursor_settings&&frame==67){
+            // Inspect a distant static target at both magnifications in captures.
+            const auto to=host.targets[13].position-host.weapon_point({0,.17,.10});
+            host.yaw=std::atan2(to.x,to.z)/tps::rad;host.pitch=std::atan2(to.y,std::hypot(to.x,to.z))/tps::rad;
+        }
         if(!host.step(context.get(),now,dt,input)){std::cerr<<"Demo host update failed\n";result=3;break;}
         audio.update(host,input.focused&&!host.inventory&&!host.paused&&!gl_panel_open(context.get()));
         if(reader)gl_sdl_apply_feedback(reader);
@@ -182,6 +188,7 @@ int main(int argc,char** argv){
             if(frame==56)saw_shotgun=host.equipped==tps::Shotgun;
             if(frame==66)saw_return=!host.inventory&&host.output.gyro_active&&host.camera_callbacks>inventory_callbacks;
             if(frame==68){sniper_delta=host.output.yaw_degrees;if(host.mode()!=tps::AimSniper||!host.scoped())result=4;}
+            if(frame==69){sniper_zoom_delta=host.output.yaw_degrees;if(host.sniper_zoom!=1||host.fov()!=10)result=4;}
             if(frame==70&&(host.scoped()||host.mode()!=tps::Explore))result=4;
             if(frame==74)saw_settings=gl_panel_open(context.get())&&!host.output.gyro_active;
             if(frame==94)saw_pause=host.paused&&!host.output.gyro_active;
@@ -205,8 +212,8 @@ int main(int argc,char** argv){
         pause_menu.draw(context.get(),host,io.DisplaySize,SDL_GetWindowDisplayScale(window),input.focused);
         gl_panel_draw(panel,io.DisplaySize.x,io.DisplaySize.y,SDL_GetWindowDisplayScale(window));
         ImGui::Render();ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(),renderer);
-        if(capture&&(frame==12||frame==28||frame==56||frame==68||frame==78||(combat_capture&&frame==38)||(calibration_capture&&frame==82)||(native_capture&&(frame==92||frame==95)))){
-            const char* mode=frame==92?"pause":frame==95?"native-menu":frame==12?"exploration":frame==28?"aim-standard":frame==38?"reload":frame==56?"inventory":frame==68?"aim-sniper":frame==82?"cancelled":"settings";
+        if(capture&&(frame==12||frame==28||frame==56||frame==68||frame==69||frame==78||(combat_capture&&frame==38)||(calibration_capture&&frame==82)||(native_capture&&(frame==92||frame==95)))){
+            const char* mode=frame==92?"pause":frame==95?"native-menu":frame==12?"exploration":frame==28?"aim-standard":frame==38?"reload":frame==56?"inventory":frame==68?"aim-sniper":frame==69?"aim-sniper-zoom":frame==82?"cancelled":"settings";
             const auto path=std::string(look_up?"demo-look-up-":look_down?"demo-look-down-":preview_weapon==tps::Pistol?"demo-pistol-":preview_weapon==tps::Shotgun?"demo-shotgun-":combat_capture?"demo-combat-":calibration_capture?"demo-calibration-":occlusion?"demo-occlusion-":cursor_settings?"demo-cursor-":"demo-")+mode+(french?"-fr":"")+(four_k?"-4k":"")+".bmp";
             auto* surface=SDL_RenderReadPixels(renderer,nullptr);
             if(!surface||!SDL_SaveBMP(surface,path.c_str())){std::cerr<<SDL_GetError();result=5;}
@@ -215,9 +222,9 @@ int main(int argc,char** argv){
         SDL_RenderPresent(renderer);++frame;if(scripted){SDL_Delay(1);if(frame>=101)running=false;}
     }
     if(smoke){
-        const bool ratios=std::abs(explore_delta-.5)<.005&&std::abs(aim_delta-.2)<.005&&std::abs(sniper_delta-.1)<.005;
+        const bool ratios=std::abs(explore_delta-.5)<.005&&std::abs(aim_delta-.5)<.005&&std::abs(sniper_delta-.2)<.005&&std::abs(sniper_zoom_delta-.0992346)<.001;
         std::cout<<"Demo: exploration="<<explore_delta<<" rifle="<<aim_delta<<" sniper="<<sniper_delta<<" inventory="<<saw_inventory<<" selected="<<saw_selection
-            <<" pistol="<<saw_pistol<<" shotgun="<<saw_shotgun<<" resumed="<<saw_return<<" F10="<<saw_settings<<" paused="<<saw_pause<<'\n';
+            <<" zoom2="<<sniper_zoom_delta<<" pistol="<<saw_pistol<<" shotgun="<<saw_shotgun<<" resumed="<<saw_return<<" F10="<<saw_settings<<" paused="<<saw_pause<<'\n';
         if(!ratios||!saw_inventory||!saw_selection||!saw_pistol||!saw_shotgun||!saw_return||!saw_settings||!saw_pause)result=4;
     }
     SDL_SetWindowRelativeMouseMode(window,false);SDL_ShowCursor();

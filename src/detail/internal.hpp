@@ -14,6 +14,8 @@
 #pragma warning(pop)
 #endif
 #include <array>
+#include <bitset>
+#include <optional>
 #include <deque>
 #include <map>
 #include <set>
@@ -31,10 +33,15 @@ enum Setting {
 struct SettingDef { const char *id,*key,*description; uint32_t type; double def,min,max,step; const char* unit; };
 extern const std::array<SettingDef,SettingCount> definitions;
 using Settings=std::array<double,SettingCount>;
+struct ProfileLink {uint32_t parent{};std::bitset<SettingCount> overrides;};
+using Profiles=std::map<uint32_t,Settings>;
+using ProfileLinks=std::map<uint32_t,ProfileLink>;
+struct RecommendedSettings {Profiles profiles;ProfileLinks links;double calibration{};};
+Settings resolve_profile(const Profiles&,const ProfileLinks&,uint32_t);
+bool valid_links(const Profiles&,const ProfileLinks&);
 Settings defaults();
 bool profile_setting(int);
 std::string profile_key(uint32_t,int);
-Settings migrate_profile(const Settings&,uint32_t);
 int setting_index(const char*);
 const char* translate(std::string_view,const char*);
 bool side_available(uint32_t caps,int choice);
@@ -76,6 +83,7 @@ struct GameplayContext {
     bool active{},available{},reported{};
     int activation_previous{-1};
     int output_target{-1}; // unannotated legacy modes use the host's dynamic target
+    bool camera_in_menu{};
     bool zoom_available{},fov_reported{};
     double fov{},reference_fov{};
 };
@@ -109,12 +117,17 @@ struct gl_context {
     // GamepadMotion owns self-referencing state; endpoints must never move.
     std::list<gyrolib::EndpointState> endpoints;
     std::set<uint64_t> manual_motion_groups;
-    std::deque<gl_event> events;
+    std::array<gl_event_ex,128> events{};
+    size_t event_begin{},event_count{};
     std::map<std::string,std::string> unknown_settings;
     std::map<uint32_t,gyrolib::GameplayContext> gameplay_contexts;
     // Saved independently of registration; temporarily unavailable mods keep values.
     std::map<uint32_t,gyrolib::Settings> context_settings;
-    bool settings_need_upgrade{};
+    gyrolib::ProfileLinks profile_links;
+    std::optional<gyrolib::RecommendedSettings> recommended;
+    gyrolib::Profiles profile_snapshot() const;
+    void profiles_changed(const gyrolib::Profiles&);
+    int save_change();
     uint32_t previous_profile{};
     uint32_t filter_profile{}; // input events may arrive before the camera update
     uint32_t previous_output_target=GL_OUTPUT_CAMERA;
@@ -122,16 +135,27 @@ struct gl_context {
     uint32_t output_target=GL_OUTPUT_CAMERA;
     std::string language="en";
     uint32_t menu_key=10;
+    bool gamepad_menu_shortcut=true,menu_chord_armed=false;
+    uint64_t menu_chord_device=0,menu_chord_endpoint=0,menu_chord_sample=0,menu_chord_update=0;
     std::string settings_path;
     unsigned settings_batch_depth{};
     int settings_save_result=GL_OK;
     mutable std::array<std::string,8> button_pair_labels;
+    mutable std::array<std::string,2> trigger_pair_labels;
+    std::array<uint32_t,9> resolved_input_caps{};
     uint64_t selected{},active{},now{},selected_at{},switched_at{},previous_frame{};
     bool panel{},held_previous{},toggle{true},controls_primed{},safe_previous{};
+    uint64_t panel_opening{};
+    uint32_t panel_opening_context{};
     int activation_previous{-1};
     gl_host_state host{};
     gl_output output{};
     gl_diagnostics totals{};
+    // Optional owner-thread frontend publication after a complete core update.
+    // Kept private so core-only builds have no renderer/link dependency.
+    int32_t (*publish_overlay)(void*){};
+    void* overlay_user{};
+    void (*panel_changed)(void*,bool){};
     gyrolib::Flick flick;
     gyrolib::Flick flick_touchpad;
     bool suppress_touchpad{},touchpad_pulse{};
@@ -139,8 +163,9 @@ struct gl_context {
     gl_gyro_state gyro_state{};
     uint32_t modifiers{};
     int gyro_override{-1};
-    uint64_t flick_endpoint{},flick_time{},flick_report{};
-    std::array<gyrolib::ShortPressGate,64> gates;
+    struct FlickTimeline {uint64_t endpoint{},time{},report{};};
+    std::array<FlickTimeline,2> flick_timelines{};
+    std::array<gyrolib::LongPressBlocker,64> long_press_blockers;
     gl_camera_callback camera{};
     void* camera_user{};
     gl_sample_observer sample_observer{};
@@ -153,15 +178,17 @@ struct gl_context {
     const gyrolib::EndpointState* button_companion() const;
     const gyrolib::EndpointState* control_authority(uint32_t family) const;
     gyrolib::ButtonContact button_contact(uint32_t) const;
-    void migrate_contact_bindings();
     gl_capabilities capabilities() const;
     gl_flick_input flick_inputs() const;
-    const gyrolib::EndpointState* flick_provider() const;
+    const gyrolib::EndpointState* flick_provider(uint32_t family) const;
+    gl_flick_input flick_input(const gyrolib::EndpointState&) const;
+    uint32_t flick_available(const gyrolib::EndpointState&) const;
     gl_trigger_input trigger_inputs() const;
     uint32_t winning_context() const;
     uint32_t effective_output_target(uint32_t context_id) const;
     uint32_t effective_output_target() const {return effective_output_target(winning_context());}
     gyrolib::Settings effective_settings(uint32_t context_id) const;
-    void emit(uint32_t type,int detail=0,uint64_t ep=0,double value=0,const char* setting=nullptr);
+    gyrolib::Settings device_settings(uint32_t context_id) const;
+    void emit(uint32_t type,int detail=0,uint64_t ep=0,double value=0,const char* setting=nullptr) noexcept;
     void reset_temporal();
 };

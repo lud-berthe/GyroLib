@@ -1,15 +1,54 @@
-# Build and consume
+# Build and consume the SDK
 
-Requires CMake 3.24+, C++20, and C11 for the C consumer checks. Windows x64 with
-MSVC is tested. The Windows build scripts and bundled-runtime tests
-require **PowerShell 7**, available as `pwsh` on PATH; Windows PowerShell 5.1
-(`powershell.exe`) is insufficient. Check with `pwsh --version` before configuring.
-Consuming a prebuilt SDK does not itself require PowerShell.
+[Documentation](INDEX.md) / Maintenance
 
-Configuration performs no downloads. SDL, Dear ImGui and GamepadMotionHelpers
-are vendored; [THIRD_PARTY.md](THIRD_PARTY.md) owns their versions and notices.
+Use the installed CMake package to link a mod without rebuilding GyroLib.
+Source-build instructions follow below. Dependencies are included; normal
+configuration downloads nothing.
+
+## Link a mod
+
+```cmake
+cmake_minimum_required(VERSION 3.24)
+project(MyMod LANGUAGES CXX)
+find_package(GyroLib 1.0 CONFIG REQUIRED COMPONENTS Core)
+add_library(my_mod SHARED mod.cpp)
+target_link_libraries(my_mod PRIVATE GyroLib::gyrolib)
+```
+
+Configure with `-DCMAKE_PREFIX_PATH=<absolute-sdk-directory>`. Targets carry
+include paths, language requirements and import definitions. C consumers can use
+`LANGUAGES C`. The installed SDK is relocatable.
+
+| Component | Target | Use |
+|---|---|---|
+| Core | `GyroLib::gyrolib` | C API or C++ Context |
+| SDL | `GyroLib::gyrolib_sdl` | SDL adapter and direct SDL calls |
+| Steam | `GyroLib::gyrolib_steam` | Borrowed callback adapter; no SDK needed for the adapter itself |
+| Panel | `GyroLib::gyrolib_panel` | Static host-owned ImGui frontend |
+| Overlay | `GyroLib::gyrolib` | Autonomous DX12 frontend when built in |
+
+Request only components present in the SDK. A core-only build has no SDL/ImGui
+dependency. In the default bundled SDK, hosts using only GyroLib's acquisition
+API or C++ `SdlInput` can link Core. Direct SDL calls, as in the
+[quickstart](QUICKSTART.md), need the SDL component and its delay-load shim.
+
+Windows SDKs built with vendored SDL include its matching development package
+under `third_party/SDL3`; `CMAKE_PREFIX_PATH` is enough. An external SDL build
+(`GL_USE_BUNDLED_SDL=OFF` or an explicit external `SDL3_DIR`) keeps that dependency
+external, so consumers must make the matching package discoverable. An existing
+SDL target or explicit consumer `SDL3_DIR` can override discovery; it must remain
+compatible with the GyroLib build. Follow [SDL instance ownership](DISTRIBUTION.md#hosts-that-call-sdl).
+
+Source consumers can use `add_subdirectory` and the same targets. The typed
+Steamworks bridge separately requires the host's licensed SDK.
 
 ## Build variants
+
+Source builds require CMake 3.24+, C++20 and C11 for the C checks. Windows
+x64/MSVC is tested. The scripts and bundled-runtime tests need PowerShell 7
+(`pwsh` on PATH); Windows PowerShell 5.1 is insufficient. Prebuilt SDK consumers
+do not need PowerShell. Dependency versions are in [Licenses and provenance](THIRD_PARTY.md).
 
 ```powershell
 # Default Windows single DLL, panel, demo and tests:
@@ -18,14 +57,13 @@ pwsh -NoProfile -File ./tools/build.ps1
 pwsh -NoProfile -File ./tools/build.ps1 -BuildDirectory build-core -CoreOnly
 # Full static build:
 pwsh -NoProfile -File ./tools/build.ps1 -BuildDirectory build-static -Static
-# Separate shared core/acquisition DLLs:
+# Separate shared libraries:
 pwsh -NoProfile -File ./tools/build.ps1 -BuildDirectory build-modular -Modular
 ```
 
-The script configures, builds Release and runs CTest. It explicitly resets its
-variant options on each invocation, so an earlier CoreOnly/Static run does not
-silently change a later default build. Separate directories remain convenient
-for comparing variants. Equivalent commands for the default Visual Studio build are:
+The script configures, builds Release and runs CTest. It resets variant options
+on each invocation; separate directories make comparisons easier. The default
+Visual Studio build can also be run directly:
 
 ```powershell
 cmake -S . -B build -A x64
@@ -37,76 +75,36 @@ cmake --install build --config Release --prefix dist/sdk
 | Option | Purpose |
 |---|---|
 | `BUILD_SHARED_LIBS` | Shared or static core/acquisition libraries |
-| `GL_SINGLE_DLL` | Bundle core, acquisition and runtime resources into one Windows/MSVC DLL; default on for supported shared builds |
-| `GL_BUILD_SDL` | Build SDL acquisition and its isolated sensor reader |
-| `GL_BUILD_PANEL` | Build the static ImGui settings frontend |
-| `GL_BUILD_EXAMPLES` | Build/install the sole demo, `gyrolib_demo` |
-| `GL_BUILD_TESTS` | Build regression/consumer fixtures; these are not installed |
-| `GL_USE_BUNDLED_SDL` | Use the checked-in Windows x64 SDL development package |
+| `GL_SINGLE_DLL` | Windows/MSVC shared build bundling core, acquisition and runtime resources; requires SDL |
+| `GL_BUILD_SDL` | SDL acquisition and isolated sensor reader |
+| `GL_BUILD_PANEL` | Static ImGui frontend |
+| `GL_BUILD_OVERLAY` | Windows DX12 frontend inside GyroLib; requires panel sources |
+| `GL_BUILD_EXAMPLES` | Build/install `gyrolib_demo` |
+| `GL_BUILD_TESTS` | Regression/consumer fixtures; not installed |
+| `GL_USE_BUNDLED_SDL` | Checked-in Windows x64 SDL package |
 
-Single-DLL builds require Windows, MSVC, shared linkage and SDL. Static and modular
-builds set `GL_SINGLE_DLL=OFF`. The panel remains static code in the host. Build
-directories contain fixtures and intermediates: distribute an installation,
-not the whole build tree. [DISTRIBUTION.md](DISTRIBUTION.md) owns runtime payloads,
-SDL instance ownership and cache behavior.
+Static and modular builds use `GL_SINGLE_DLL=OFF`. Distribute an installation,
+not a build directory full of fixtures and intermediates. See [distribution](DISTRIBUTION.md).
 
-## Consume the installed SDK
+## Verify an installation
 
-```cmake
-cmake_minimum_required(VERSION 3.24)
-project(MyMod LANGUAGES CXX)
-find_package(GyroLib CONFIG REQUIRED COMPONENTS Core)
-add_library(my_mod SHARED mod.cpp)
-target_link_libraries(my_mod PRIVATE GyroLib::gyrolib)
-```
+Build and test `tests/install_consumer` against the installed prefix; it must not
+rely on source-tree includes. [Validation](VALIDATION.md#run-the-checks) provides
+the commands. Compile the quickstart too after changing its example or exports.
+Preserve existing `gyrolib.ini` files when updating an SDK used for play testing.
 
-Configure with `-DCMAKE_PREFIX_PATH=<absolute-sdk-directory>`. The exported targets
-carry includes, language requirements and import definitions. C-only consumers
-can use `LANGUAGES C`; no C++ types or exceptions cross the C ABI.
-The SDK can be moved to another directory; its package files resolve dependencies
-relative to the installation.
+Documentation is prepared during CMake generation to adjust installed relative
+links. Build again after editing guides, then install; `cmake --install` alone
+does not regenerate them.
 
-| Component / target | Use |
-|---|---|
-| `Core` / `GyroLib::gyrolib` | Core C ABI or C++ `Context`; no SDL headers needed |
-| `SDL` / `GyroLib::gyrolib_sdl` | SDL adapter and direct SDL calls; the default Windows SDK includes the matching SDL development package |
-| `Steam` / `GyroLib::gyrolib_steam` | Borrowed callback adapter; no Steam SDK required for this adapter itself |
-| `Panel` / `GyroLib::gyrolib_panel` | Static frontend; host supplies ImGui frame, events and renderer |
+## Dependencies and other platforms
 
-For the default bundled SDK, a host using only GyroLib's C acquisition functions
-or `SdlInput` can link `GyroLib::gyrolib` without an SDL development package.
-Direct SDL calls, as in the README window example, require the `SDL` component;
-its target supplies the delay-load shim. The installed Windows SDK automatically
-finds its SDL development files under `third_party/SDL3`. `CMAKE_PREFIX_PATH` is
-the only package path required; do not point it back into the GyroLib checkout.
-Windows modular/static SDKs built with vendored SDL include the same development
-package and their consumers also link the SDL target.
+`tools/build_sdl.ps1` reconstructs the vendored SDL binary from a checksum-verified
+archive, downloading it only when absent. It applies the retained
+[SDL changes](../third_party/SDL/README-GyroLib.md). Ordinary builds use the existing
+binary and never download Steamworks.
 
-A build using external SDL (`GL_USE_BUNDLED_SDL=OFF`, or an explicitly supplied
-external `SDL3_DIR`) keeps that dependency external: its SDK consumers must make
-the matching SDL package discoverable. An explicit consumer `SDL3_DIR` or existing
-SDL target can select another installation, which must be compatible with the
-GyroLib build. SDL instance ownership is described in [DISTRIBUTION.md](DISTRIBUTION.md).
-
-A source consumer can instead use `add_subdirectory` and the same `GyroLib::`
-target names. Request only the components built into your SDK. A core-only
-configuration has no SDL/ImGui dependency. The typed Steamworks bridge example
-requires the host's licensed SDK; the callback adapter does not.
-
-The complete minimal C++ program is in the [README](../README.md#first-integration).
-The `tests/install_consumer` project checks package discovery independently of
-source-tree includes. Verify an installed SDK after changing exports or packaging;
-a successful source-tree build alone does not establish that contract.
-
-## Dependency reconstruction and other platforms
-
-Run `pwsh -NoProfile -File ./tools/build_sdl.ps1` only when rebuilding the vendored SDL binary. It uses
-a checksum-verified source archive, downloading it only if absent, and applies
-the patches documented in [SDL changes](../third_party/SDL/README-GyroLib.md).
-Installed SDKs retain these notices/patches under `share/doc/GyroLib/sdl-changes`.
-Normal GyroLib builds use the existing dependency; no Steam SDK is downloaded.
-
-For a prospective Linux build, supply a system SDL3 package and use:
+A prospective Linux build needs a system SDL3 package:
 
 ```sh
 cmake -S . -B build -DGL_USE_BUNDLED_SDL=OFF -DGL_SINGLE_DLL=OFF -DCMAKE_BUILD_TYPE=Release
@@ -114,6 +112,5 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-Linux compilation/loading, Steam Deck, Wine and Proton have not been validated.
-Windows binaries and tests do not establish support there. The current evidence
-and manual acceptance boundaries are in [VALIDATION.md](VALIDATION.md).
+Linux loading, Steam Deck, Wine and Proton remain unvalidated. These commands
+are a starting point, not a compatibility claim.

@@ -1,5 +1,6 @@
 #pragma once
 #include "host.hpp"
+#include "inheritance_widgets.hpp"
 #include <imgui.h>
 #include <cstdio>
 #include <cstring>
@@ -33,7 +34,10 @@ struct PauseMenu {
         if(!std::strcmp(key,"flick.mode")&&int(value)!=GL_FLICK_OFF)return GL_ADVANCED_FLICK;
         return GL_ADVANCED_NONE;
     }
+    void marker(gl_context* c,const gl_setting_info& s){gyro_profile_widgets::marker(c,s.id,[&](const char* id){result=gl_setting_inherit(c,id);});}
     void widget(gl_context* c,const gl_setting_info& s,float width){
+        const float mark=gyro_profile_widgets::marker_width(c,s.id);
+        width=width<0?width-mark:width>0?std::max(40.f,width-mark):width;
         ImGui::PushID(s.id);ImGui::BeginDisabled(!s.available);ImGui::SetNextItemWidth(width);
         if(s.type==GL_SETTING_BOOL){
             bool value=s.value!=0;if(ImGui::Checkbox("##value",&value))result=gl_setting_set(c,s.id,value);
@@ -59,7 +63,7 @@ struct PauseMenu {
                 ImGui::EndCombo();
             }
         }else if(s.type==GL_SETTING_ACTION){if(ImGui::Button(s.label,ImVec2(width,0)))result=gl_action(c,s.id);}
-        help(s.description);ImGui::EndDisabled();ImGui::PopID();
+        help(s.description);marker(c,s);ImGui::EndDisabled();ImGui::PopID();
     }
     void controllers(gl_context* c){
         std::vector<gl_endpoint> devices,sensors;
@@ -69,14 +73,17 @@ struct PauseMenu {
             if(std::none_of(devices.begin(),devices.end(),[&](auto& d){return d.physical_id==e.physical_id;}))devices.push_back(e);
         }
         const auto selected=gl_get_selected_device(c);
-        const char* preview=gl_text(c,selected?"ui.controller.disconnected":"ui.controller.none");
+        const char* preview=gl_text(c,!devices.empty()&&selected?"ui.controller.disconnected":"ui.controller.none");
         for(const auto& d:devices)if(d.physical_id==selected)preview=d.name;
+        ImGui::BeginDisabled(devices.empty());
         ImGui::AlignTextToFramePadding();ImGui::TextUnformatted(gl_text(c,"ui.controller"));ImGui::SameLine();ImGui::SetNextItemWidth(-1);
         if(ImGui::BeginCombo("##controller",preview)){
             for(const auto& d:devices){ImGui::PushID(std::to_string(d.physical_id).c_str());
                 if(ImGui::Selectable(d.name,d.physical_id==selected))result=gl_select_device(c,d.physical_id);ImGui::PopID();}
             ImGui::EndCombo();
         }
+        ImGui::EndDisabled();
+        if(!gyro_profile_widgets::controller_connected(c))return;
         help(gl_text(c,"warning.double"));
         if(gl_motion_sensor_needs_selection(c,selected)){
             const auto bound=gl_get_motion_sensor(c,selected);const char* sensor=gl_text(c,"ui.sensor.choose");
@@ -93,6 +100,7 @@ struct PauseMenu {
     void rows(gl_context* c,uint64_t tab,float scale){
         // Re-query each frame: capabilities, calibration and edits from F10 may
         // have changed. Native engines can instead invalidate on gl_poll_event.
+        gyro_profile_widgets::parent_selector(c,uint32_t(tab-1),[&](uint32_t view,uint32_t parent){result=gl_set_context_parent(c,view,parent);});
         const uint32_t count=gl_menu_tab_setting_count(c,tab);
         std::vector<gl_setting_info> rows;
         for(uint32_t i=0;i<count;++i){gl_setting_info s{};
@@ -106,7 +114,7 @@ struct PauseMenu {
             bool activator_heading=false;
             const auto draw_row=[&](const gl_setting_info& s,bool detail){
                 const auto* key=suffix(s.id);const auto group=control_group(key,s.value);
-                if(!std::strcmp(key,"gyro.invert_x")||!std::strcmp(key,"gyro.invert_y")||!std::strcmp(key,"gyro.invert_roll")||!std::strcmp(key,"activation.short_press")||
+                if(!std::strcmp(key,"gyro.invert_x")||!std::strcmp(key,"gyro.invert_y")||!std::strcmp(key,"gyro.invert_roll")||!std::strcmp(key,"activation.block_long_press")||
                     !std::strcmp(key,"activation.stick_threshold")||!std::strcmp(key,"activation.trigger_threshold"))return;
                 ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::AlignTextToFramePadding();
                 const float start=ImGui::GetCursorPosX();
@@ -125,28 +133,31 @@ struct PauseMenu {
                     ImGui::SameLine(start+gutter);
                 }else ImGui::SetCursorPosX(start+gutter+(detail?16*scale:gl_setting_is_activator(s.id)?24*scale:0));
                 ImGui::AlignTextToFramePadding();
+                ImGui::BeginDisabled(!s.available);
                 ImGui::PushTextWrapPos(0);ImGui::TextUnformatted(s.label);ImGui::PopTextWrapPos();help(s.description);
+                ImGui::EndDisabled();
                 const auto label_min=ImGui::GetItemRectMin(),label_max=ImGui::GetItemRectMax();label_bottom=std::max(label_max.y,parent_bottom);
                 if(detail)child_labels.push_back(ImVec2(label_min.x,(label_min.y+label_max.y)*.5f));
                 if(gl_setting_is_activator(s.id))activator_labels.push_back(ImVec2(label_min.x,(label_min.y+label_max.y)*.5f));
                 ImGui::TableNextColumn();const auto width=ImGui::GetContentRegionAvail().x;
                 const bool axis=!std::strcmp(key,"sensitivity_x")||!std::strcmp(key,"sensitivity_y");
                 const auto* beside=axis?find(!std::strcmp(key,"sensitivity_x")?"gyro.invert_x":"gyro.invert_y"):
-                    !std::strcmp(key,"activation.button")?find("activation.short_press"):nullptr;
+                    !std::strcmp(key,"activation.button")?find("activation.block_long_press"):nullptr;
                 const auto* roll=!std::strcmp(key,"sensitivity_x")?find("gyro.invert_roll"):nullptr;
                 const auto* limit=!std::strcmp(key,"activation.trigger")?find("activation.trigger_threshold"):
                     !std::strcmp(key,"activation.stick_deflection")?find("activation.stick_threshold"):nullptr;
                 if(beside){
-                    const auto* label=gl_text(c,axis?"ui.invert.short":"ui.short_press.short");
+                    const auto* label=gl_text(c,axis?"ui.invert.short":"ui.block_long_press");
                     const auto checkbox_width=[&](const char* name){return ImGui::GetFrameHeight()+ImGui::CalcTextSize(name).x+ImGui::GetStyle().ItemInnerSpacing.x;};
                     const float gap=ImGui::GetStyle().ItemSpacing.x;
                     const float reserved=roll?ImGui::CalcTextSize(label).x+checkbox_width(gl_text(c,"ui.invert.yaw.short"))+
                         checkbox_width(gl_text(c,"ui.invert.roll.short"))+3*gap:checkbox_width(label)+gap;
-                    widget(c,s,std::max(40.f,width-reserved));ImGui::SameLine();
+                    const float extra=gyro_profile_widgets::marker_width(c,beside->id)+(roll?gyro_profile_widgets::marker_width(c,roll->id):0);
+                    widget(c,s,std::max(40.f,width-reserved-extra));ImGui::SameLine();
                     const auto checkbox=[&](const gl_setting_info& setting,const char* name){
                         ImGui::PushID(setting.id);ImGui::BeginDisabled(!setting.available);bool inverted=setting.value!=0;
                         if(ImGui::Checkbox(name,&inverted))result=gl_setting_set(c,setting.id,inverted);
-                        help(setting.description);ImGui::EndDisabled();ImGui::PopID();
+                        help(setting.description);marker(c,setting);ImGui::EndDisabled();ImGui::PopID();
                     };
                     if(roll){
                         ImGui::AlignTextToFramePadding();ImGui::TextDisabled("%s",label);ImGui::SameLine();
@@ -155,7 +166,7 @@ struct PauseMenu {
                     }else checkbox(*beside,label);
                 }else if(limit){
                     const auto* label=gl_text(c,"ui.threshold.short");
-                    const float reserved=ImGui::CalcTextSize(label).x+110*scale+2*ImGui::GetStyle().ItemSpacing.x;
+                    const float reserved=ImGui::CalcTextSize(label).x+110*scale+2*ImGui::GetStyle().ItemSpacing.x+gyro_profile_widgets::marker_width(c,limit->id);
                     widget(c,s,std::max(40.f,width-reserved));ImGui::SameLine();ImGui::AlignTextToFramePadding();
                     ImGui::TextDisabled("%s",label);help(limit->description);ImGui::SameLine();
                     ImGui::PushID(limit->id);ImGui::BeginDisabled(!limit->available);ImGui::SetNextItemWidth(110*scale);
@@ -163,7 +174,7 @@ struct PauseMenu {
                     const int ticks=int(std::round((limit->maximum-limit->minimum)/limit->step));
                     char format[32];std::snprintf(format,sizeof(format),"%.2f",limit->value);
                     if(ImGui::SliderInt("##threshold",&tick,0,ticks,format))result=gl_setting_set(c,limit->id,limit->minimum+tick*limit->step);
-                    help(limit->description);ImGui::EndDisabled();ImGui::PopID();
+                    help(limit->description);marker(c,*limit);ImGui::EndDisabled();ImGui::PopID();
                 }else widget(c,s,-1);
             };
             for(const auto& s:rows){
@@ -199,11 +210,12 @@ struct PauseMenu {
         }
     }
     float calibration(gl_context* c,float scale,bool measure=false){
-        gl_setting_info automatic{},action{},reset{};
+        gl_setting_info automatic{},action{},reset{},recommended{};
         for(uint32_t i=0;i<gl_menu_shared_setting_count(c);++i){gl_setting_info s{};
             if(gl_menu_shared_setting_at(c,i,&s)!=GL_OK||!s.visible)continue;
             if(!std::strcmp(s.id,"calibration.automatic"))automatic=s;
             else if(!std::strcmp(s.id,"settings.reset"))reset=s;
+            else if(!std::strcmp(s.id,"settings.recommended"))recommended=s;
             else if(!std::strcmp(s.id,"calibration.begin")||!std::strcmp(s.id,"calibration.cancel"))action=s;
         }
         gl_diagnostics d{};gl_get_diagnostics(c,&d);
@@ -216,17 +228,26 @@ struct PauseMenu {
         if(saved!=GL_OK&&saved!=GL_UNAVAILABLE)std::snprintf(error,sizeof(error),"%s (%d)",gl_text(c,"ui.save_failed"),saved);
         else if(result!=GL_OK)std::snprintf(error,sizeof(error),"%s (%d)",gl_text(c,"ui.operation_failed"),result);
         const float width=ImGui::GetContentRegionAvail().x,gap=ImGui::GetStyle().ItemSpacing.x;
-        const float total=ImGui::CalcTextSize(gl_text(c,"ui.auto_calibration")).x+170*scale+
-            ImGui::CalcTextSize(action.label).x+ImGui::CalcTextSize(reset.label).x+4*ImGui::GetStyle().FramePadding.x+3*gap;
-        const bool wrap=total>width;
-        const float height=(wrap?2:1)*ImGui::GetFrameHeightWithSpacing()+12*scale+
+        const float padding=2*ImGui::GetStyle().FramePadding.x;
+        const float label_width=ImGui::CalcTextSize(gl_text(c,"ui.auto_calibration")).x;
+        const float calibrate_width=ImGui::CalcTextSize(action.label).x+padding;
+        const bool label_above=label_width+150*scale+calibrate_width+2*gap>width;
+        const float combo_width=width-calibrate_width-gap-(label_above?0:label_width+gap);
+        const float half_width=(width-gap)*.5f;
+        const bool stack_actions=recommended.visible&&std::max(ImGui::CalcTextSize(reset.label).x,
+            ImGui::CalcTextSize(recommended.label).x)+padding>half_width;
+        const float action_width=stack_actions?width:half_width;
+        const float height=(2+int(label_above)+int(stack_actions))*ImGui::GetFrameHeightWithSpacing()+12*scale+
             (status[0]?ImGui::CalcTextSize(status,nullptr,false,width).y+gap:0)+
             (error[0]?ImGui::CalcTextSize(error,nullptr,false,width).y+gap:0);
         if(measure)return height;
-        ImGui::Separator();ImGui::AlignTextToFramePadding();ImGui::TextUnformatted(gl_text(c,"ui.auto_calibration"));ImGui::SameLine();
-        widget(c,automatic,170*scale);
-        if(!wrap)ImGui::SameLine();
-        widget(c,action,0);ImGui::SameLine();widget(c,reset,0);
+        ImGui::Separator();ImGui::AlignTextToFramePadding();ImGui::TextUnformatted(gl_text(c,"ui.auto_calibration"));
+        if(!label_above)ImGui::SameLine();widget(c,automatic,combo_width);
+        ImGui::SameLine();widget(c,action,calibrate_width);
+        if(!recommended.visible)ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x-action_width);
+        ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(0,0,0,0));ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize,1.f);
+        widget(c,reset,action_width);ImGui::PopStyleVar();ImGui::PopStyleColor();
+        if(recommended.visible){if(!stack_actions)ImGui::SameLine();widget(c,recommended,action_width);}
         if(status[0])ImGui::TextWrapped("%s",status);
         if(error[0])ImGui::TextWrapped("%s",error);
         return height;
@@ -266,6 +287,7 @@ struct PauseMenu {
             ImGui::SameLine(ImGui::GetWindowWidth()-190*scale);ImGui::SetNextItemWidth(165*scale);
             if(ImGui::Combo("##language",&language,labels,6))result=gl_set_language(c,codes[language]);
             ImGui::Separator();controllers(c);
+            if(gyro_profile_widgets::controller_connected(c)){
             if(!gl_menu_tab_setting_count(c,tab_id)){gl_menu_tab tab{};if(gl_menu_tab_at(c,0,&tab)==GL_OK)tab_id=tab.id;select_tab=true;}
             const float footer=calibration(c,scale,true);
             if(ImGui::BeginTabBar("NativeViews",ImGuiTabBarFlags_FittingPolicyScroll)){
@@ -273,7 +295,8 @@ struct PauseMenu {
                     const auto label=std::string(tab.label)+"###native-view-"+std::to_string(tab.id);
                     const bool requested=select_tab&&tab_id==tab.id;
                     if(ImGui::BeginTabItem(label.c_str(),nullptr,requested?ImGuiTabItemFlags_SetSelected:0)){
-                        tab_id=tab.id;select_tab=false;
+                        if(requested)select_tab=false;
+                        if(!select_tab)tab_id=tab.id;
                         if(ImGui::BeginChild("NativeRows",ImVec2(0,-footer),ImGuiChildFlags_NavFlattened,ImGuiWindowFlags_AlwaysVerticalScrollbar))rows(c,tab.id,scale);
                         ImGui::EndChild();ImGui::EndTabItem();
                     }
@@ -281,6 +304,7 @@ struct PauseMenu {
                 ImGui::EndTabBar();
             }
             calibration(c,scale);
+            }
         }
         ImGui::EndDisabled();ImGui::End();ImGui::PopStyleColor(7);ImGui::PopStyleVar(5);ImGui::PopFont();
     }

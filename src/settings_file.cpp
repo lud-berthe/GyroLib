@@ -43,8 +43,7 @@ extern "C" int32_t GL_CALL gl_initialize_settings(gl_context* c,const char* dire
     const auto target=parent/GL_SETTINGS_FILENAME;const auto path=target.u8string();
     const auto* utf8=reinterpret_cast<const char*>(path.c_str());
     if(fs::exists(target)){
-        const auto result=gl_load_settings(c,utf8);if(result!=GL_OK)return finish(result);
-        return finish(c->settings_need_upgrade?gl_save_settings(c,utf8):GL_OK);
+        return finish(gl_load_settings(c,utf8));
     }
     if(legacy&&*legacy&&fs::exists(fs::path(reinterpret_cast<const char8_t*>(legacy)))){
         const auto result=gl_load_settings(c,legacy);if(result!=GL_OK)return finish(result);

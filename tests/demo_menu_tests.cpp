@@ -49,7 +49,7 @@ int main(int argc,char** argv){
         key(ImGuiKey_DownArrow,native);key(ImGuiKey_Enter,native);frame(native);
         require(host.paused&&host.gyro_menu&&!gl_panel_open(c.get()),"keyboard must open host gyro settings without the F10 panel");
         require(gl_get_menu_key(c.get())==0,"native menu must work with the library shortcut disabled");
-        for(const char* language:{"en","fr"}){
+        for(const char* language:{"en","fr","de","es","it","pt"}){
             gl_set_language(c.get(),language);frame(native);frame(native);
             auto* w=ImGui::FindWindowByName("Pause###DemoPause");require(w&&w->Active,"native menu did not render");
             require(w->Pos.x>=0&&w->Pos.y>=0&&w->Pos.x+w->Size.x<=1024&&w->Pos.y+w->Size.y<=720,"native window exceeded viewport");
@@ -68,7 +68,7 @@ int main(int argc,char** argv){
         gl_setting_set(c.get(),"context.101.gyro.activation",GL_HOLD_DISABLE);
         gl_setting_set(c.get(),"context.101.activation.temporary_invert",1);
         gl_setting_set(c.get(),"context.101.activation.trackball",1);
-        for(int size=0;size<2;++size)for(const char* language:{"en","fr"})for(int group=0;group<4;++group){
+        for(int size=0;size<2;++size)for(const char* language:{"en","fr","de","es","it","pt"})for(int group=0;group<4;++group){
             io.DisplaySize=size?ImVec2(3840,2160):ImVec2(1024,720);
             SDL_SetWindowSize(window,int(io.DisplaySize.x),int(io.DisplaySize.y));
             gl_set_language(c.get(),language);frame(native);
@@ -152,23 +152,23 @@ int main(int argc,char** argv){
         double flick_mode=1;gl_setting_get(c.get(),parents[2],&flick_mode);
         require(flick_mode==double(GL_FLICK_ON),"expanding Flick options enabled it");
         key(ImGuiKey_GamepadFaceDown,native);require(!child->StateStorage.GetBool(flick_open),"Flick options cannot collapse");
-        // The short-press setting shares the button row. Drive the actual
+        // The long-press blocking setting shares the button row. Drive the actual
         // inline checkbox rather than a separate copy of the native widget.
         gl_setting_set(c.get(),"context.101.gyro.activation",GL_HOLD);
         gl_setting_set(c.get(),"context.101.activation.button",tps::ButtonWest+1);
-        gl_setting_set(c.get(),"context.101.activation.short_press",0);frame(native);
+        gl_setting_set(c.get(),"context.101.activation.block_long_press",0);frame(native);
         const auto button_parent=ImHashStr("context.101.activation.button",0,table);
         const auto button_combo=ImHashStr("##value",0,button_parent);
-        const auto tap_parent=ImHashStr("context.101.activation.short_press",0,table);
-        const auto tap_checkbox=ImHashStr(gl_text(c.get(),"ui.short_press.short"),0,tap_parent);
-        for(int n=0;n<60&&GImGui->NavId!=button_combo&&GImGui->NavId!=tap_checkbox;++n)key(ImGuiKey_UpArrow,native);
-        require(GImGui->NavId==button_combo||GImGui->NavId==tap_checkbox,"keyboard cannot reach inline short-press option");
+        const auto blocker_parent=ImHashStr("context.101.activation.block_long_press",0,table);
+        const auto blocker_checkbox=ImHashStr(gl_text(c.get(),"ui.block_long_press"),0,blocker_parent);
+        for(int n=0;n<60&&GImGui->NavId!=button_combo&&GImGui->NavId!=blocker_checkbox;++n)key(ImGuiKey_UpArrow,native);
+        require(GImGui->NavId==button_combo||GImGui->NavId==blocker_checkbox,"keyboard cannot reach inline long-press blocking option");
         if(GImGui->NavId==button_combo)key(ImGuiKey_RightArrow,native);
-        require(GImGui->NavId==tap_checkbox,"short-press checkbox must be to the right of the button");
-        key(ImGuiKey_Space,native);double tap=0;gl_setting_get(c.get(),"context.101.activation.short_press",&tap);
+        require(GImGui->NavId==blocker_checkbox,"long-press blocking checkbox must be to the right of the button");
+        key(ImGuiKey_Space,native);double tap=0;gl_setting_get(c.get(),"context.101.activation.block_long_press",&tap);
         require(tap==1,"inline checkbox did not update the shared setting");
-        key(ImGuiKey_GamepadFaceDown,native);gl_setting_get(c.get(),"context.101.activation.short_press",&tap);
-        require(tap==0,"gamepad cannot toggle the inline short-press option");
+        key(ImGuiKey_GamepadFaceDown,native);gl_setting_get(c.get(),"context.101.activation.block_long_press",&tap);
+        require(tap==0,"gamepad cannot toggle the inline long-press blocking option");
         gl_setting_set(c.get(),"context.101.gyro.activation",GL_HOLD_DISABLE);frame(native);
         const auto hold_parent=ImHashStr(parents[3],0,table);
         const auto hold_combo=ImHashStr("##value",0,hold_parent),hold_toggle=ImHashStr("###advanced-toggle",0,hold_parent);

@@ -43,6 +43,39 @@ struct Fixture {
     }
     void prime(){tick();tick();tick();}
 };
+static void gamepad_menu_shortcut(){
+    constexpr uint32_t back=1u<<4,start=1u<<6,chord=back|start;
+    Fixture f(false);f.device();f.host.camera_allowed=0;f.host.paused=f.host.menu_open=1;
+    CHECK(gl_get_gamepad_menu_shortcut(f.c)==1);
+    CHECK(gl_set_gamepad_menu_shortcut(nullptr,1)==GL_INVALID);
+    CHECK(gl_set_gamepad_menu_shortcut(f.c,2)==GL_INVALID);
+    const auto press=[&](uint32_t buttons){f.controls.buttons=buttons;f.tick();};
+    press(chord);CHECK(!gl_panel_open(f.c)); // already held at connection
+    press(0);press(back);CHECK(!gl_panel_open(f.c));press(chord);CHECK(gl_panel_open(f.c));
+    for(int i=0;i<10;++i)press(chord);CHECK(gl_panel_open(f.c));
+    press(start);press(chord);CHECK(gl_panel_open(f.c)); // must release both
+    press(0);press(start);press(chord);CHECK(!gl_panel_open(f.c)); // reverse order
+    f.host.focused=0;press(0);press(chord);CHECK(!gl_panel_open(f.c));
+    f.host.focused=1;press(chord);CHECK(!gl_panel_open(f.c));
+    press(0);press(chord);CHECK(gl_panel_open(f.c));gl_set_panel_open(f.c,0);
+    press(0);f.tick({},200000000,false);press(chord);CHECK(!gl_panel_open(f.c)); // stale input
+    CHECK(gl_set_gamepad_menu_shortcut(f.c,0)==GL_OK);press(0);press(chord);CHECK(!gl_panel_open(f.c));
+    CHECK(gl_set_gamepad_menu_shortcut(f.c,1)==GL_OK);press(chord);CHECK(!gl_panel_open(f.c));
+    press(0);press(chord);CHECK(gl_panel_open(f.c));gl_set_panel_open(f.c,0);
+    // Duplicate SDL/Steam endpoints cannot toggle twice or substitute another pad.
+    f.device(2,GL_SOURCE_STEAM,7);press(0);f.controls.buttons=chord;f.tick({},10000000,true,true);CHECK(gl_panel_open(f.c));
+    f.tick({},10000000,true,true);CHECK(gl_panel_open(f.c));gl_set_panel_open(f.c,0);
+    f.device(3,GL_SOURCE_SDL,8);CHECK(gl_select_device(f.c,8)==GL_OK);
+    f.now+=10000000;f.submit(3);f.tick({},10000000,false);CHECK(!gl_panel_open(f.c));
+    f.controls.buttons=0;f.now+=10000000;f.submit(3);f.tick({},10000000,false);
+    f.controls.buttons=chord;f.now+=10000000;f.submit(3);f.tick({},10000000,false);CHECK(gl_panel_open(f.c));
+    CHECK(gl_disconnect_endpoint(f.c,3)==GL_OK);gl_set_panel_open(f.c,0);press(chord);CHECK(!gl_panel_open(f.c));
+    // No gyro is needed, but both logical buttons must be exposed by the input.
+    Fixture plain(false);gl_endpoint e{};e.id=1;e.physical_id=7;e.source=GL_SOURCE_SDL;e.connected=1;e.caps.buttons=back;
+    CHECK(gl_register_endpoint(plain.c,&e)==GL_OK);plain.prime();plain.controls.buttons=chord;plain.tick();CHECK(!gl_panel_open(plain.c));
+    e.caps.buttons=chord;CHECK(gl_register_endpoint(plain.c,&e)==GL_OK);plain.controls.buttons=0;plain.tick();
+    plain.controls.buttons=chord;plain.tick();CHECK(gl_panel_open(plain.c));
+}
 static void temporal(){
     for(uint64_t step:{1000000ull,4000000ull,10000000ull,20000000ull}){
         Fixture f;f.device();for(int i=0;i<3;++i)f.tick({0,30,0},step);
@@ -141,7 +174,7 @@ static void source_selection(){
 }
 static void calibration(){
     const auto buttons=[](gl_context* c,bool pending,bool available){
-        CHECK(gl_menu_shared_setting_count(c)==6);
+        CHECK(gl_menu_shared_setting_count(c)==7);
         bool begin=false,cancel=false;
         for(uint32_t i=0;i<gl_menu_shared_setting_count(c);++i){gl_setting_info s{},legacy{};
             CHECK(gl_menu_shared_setting_at(c,i,&s)==GL_OK);
@@ -246,11 +279,11 @@ static void flick(){
     f.host.menu_open=0;near(f.tick().yaw_degrees,0); // held through UI: needs neutral
 }
 static gl_setting_info metadata(gl_context* c,const char* id);
-static void short_press(){
-    Fixture f;f.device();f.prime();f.set("context.1.gyro.activation",GL_HOLD_DISABLE);f.set("context.1.activation.button",1);f.set("context.1.activation.short_press",1);auto t=f.now;
+static void block_long_press(){
+    Fixture f;f.device();f.prime();f.set("context.1.gyro.activation",GL_HOLD_DISABLE);f.set("context.1.activation.button",1);f.set("context.1.activation.block_long_press",1);auto t=f.now;
     CHECK(gl_filter_event(f.c,0,GL_PRESS,t,1,0)==GL_FORWARD);
     CHECK(gl_filter_event(f.c,0,GL_RELEASE,t+100,1,0)==GL_FORWARD);
-    CHECK(gl_set_host_capabilities(f.c,GL_HOST_SHORT_PRESS_FILTER)==GL_OK);
+    CHECK(gl_set_host_capabilities(f.c,GL_HOST_LONG_PRESS_BLOCKING)==GL_OK);
     CHECK(gl_filter_event(f.c,0,GL_PRESS,t,1,0)==GL_SUPPRESS);
     CHECK(gl_filter_event(f.c,0,GL_REPEAT,t+1000000,1,0)==GL_SUPPRESS);
     CHECK(gl_filter_event(f.c,0,GL_RELEASE,t+199999999,1,0)==GL_EMIT_TAP);
@@ -259,19 +292,19 @@ static void short_press(){
     CHECK(gl_filter_event(f.c,0,GL_PRESS,t,1,1)==GL_FORWARD);
     CHECK(gl_filter_event(f.c,0,GL_RELEASE,t+100,0,0)==GL_FORWARD);
     CHECK(gl_filter_event(f.c,0,GL_PRESS,t,1,0)==GL_SUPPRESS);
-    f.host.suspend_short_press=1;f.tick();
+    f.host.suspend_long_press_blocking=1;f.tick();
     CHECK(gl_filter_event(f.c,0,GL_RELEASE,t+100000000,1,0)==GL_SUPPRESS);
     CHECK(gl_filter_event(f.c,0,GL_PRESS,f.now,1,0)==GL_FORWARD);
     CHECK(gl_filter_event(f.c,0,GL_RELEASE,f.now+100,1,0)==GL_FORWARD);
-    f.host.suspend_short_press=0;f.tick();
+    f.host.suspend_long_press_blocking=0;f.tick();
     for(auto mode:{GL_ALWAYS,GL_TOGGLE}){
         f.set("context.1.gyro.activation",mode);f.tick();
-        CHECK(!metadata(f.c,"context.1.activation.short_press").visible);
+        CHECK(!metadata(f.c,"context.1.activation.block_long_press").visible);
         CHECK(gl_filter_event(f.c,0,GL_PRESS,f.now,1,0)==GL_FORWARD);
         CHECK(gl_filter_event(f.c,0,GL_RELEASE,f.now+100000000,1,0)==GL_FORWARD);
     }
     f.set("context.1.gyro.activation",GL_HOLD);f.set("context.1.activation.button",0);f.tick();
-    CHECK(metadata(f.c,"context.1.activation.short_press").visible&&!metadata(f.c,"context.1.activation.short_press").available);
+    CHECK(metadata(f.c,"context.1.activation.block_long_press").visible&&!metadata(f.c,"context.1.activation.block_long_press").available);
     CHECK(gl_filter_event(f.c,0,GL_PRESS,f.now,1,0)==GL_FORWARD);
     CHECK(gl_filter_event(f.c,0,GL_RELEASE,f.now+100000000,1,0)==GL_FORWARD);
     f.set("context.1.activation.button",1);f.set("context.1.gyro.enabled",0);f.tick();
@@ -279,7 +312,7 @@ static void short_press(){
     CHECK(gl_filter_event(f.c,0,GL_RELEASE,f.now+100000000,1,0)==GL_FORWARD);
     f.set("context.1.gyro.enabled",1);
     CHECK(gl_set_gameplay_context_output_target(f.c,1,GL_OUTPUT_CURSOR)==GL_OK);
-    CHECK(!metadata(f.c,"context.1.activation.short_press").visible);
+    CHECK(!metadata(f.c,"context.1.activation.block_long_press").visible);
 }
 static void settings(){
     Fixture f;f.device();f.prime();f.set("context.1.gyro.smoothing_ms",12);double value=0;gl_setting_get(f.c,"context.1.gyro.smoothing_ms",&value);near(value,10);
@@ -288,11 +321,11 @@ static void settings(){
     gl_event e{};bool changed=false;while(gl_poll_event(f.c,&e)==1)if(e.type==GL_EVENT_SETTING)changed=true;CHECK(changed);
     const char* path="gyrolib_test_settings.ini";
     CHECK(gl_set_settings_path(f.c,path)==GL_OK);CHECK(gl_action(f.c,"settings.save")==GL_OK);
-    {std::ofstream o(path);o<<"schema=1\ngyro.smoothing_seconds=0.125\nfuture.preference=keep-me\n";}
+    {std::ofstream o(path);o<<"schema=0.2.0\ncontext.1.gyro.smoothing_ms=125\nfuture.preference=keep-me\n";}
     CHECK(gl_load_settings(f.c,path)==GL_OK);gl_setting_get(f.c,"context.1.gyro.smoothing_ms",&value);near(value,125);
     CHECK(gl_save_settings(f.c,path)==GL_OK);{std::ifstream in(path);std::string text((std::istreambuf_iterator<char>(in)),{});CHECK(text.find("future.preference=keep-me")!=std::string::npos);}
-    {std::ofstream o(path);o<<"schema=999\n";}CHECK(gl_load_settings(f.c,path)==GL_NEWER_SCHEMA);CHECK(gl_save_settings(f.c,path)==GL_NEWER_SCHEMA);
-    {std::ofstream o(path);o<<"schema=2\ngyro.smoothing_ms=200\ngyro.space=nan\n";}CHECK(gl_load_settings(f.c,path)==GL_INVALID);gl_setting_get(f.c,"context.1.gyro.smoothing_ms",&value);near(value,125);
+    {std::ofstream o(path);o<<"schema=999.0.0\n";}CHECK(gl_load_settings(f.c,path)==GL_NEWER_SCHEMA);CHECK(gl_save_settings(f.c,path)==GL_NEWER_SCHEMA);
+    {std::ofstream o(path);o<<"schema=0.2.0\ncontext.1.gyro.smoothing_ms=200\ncontext.1.gyro.space=nan\n";}CHECK(gl_load_settings(f.c,path)==GL_INVALID);gl_setting_get(f.c,"context.1.gyro.smoothing_ms",&value);near(value,125);
     std::filesystem::remove(path);gl_set_settings_path(f.c,"");
     CHECK(gl_set_language(f.c,"fr")==GL_OK);CHECK(std::strcmp(gl_text(f.c,"off"),"?")!=0);
     gl_choice choice{};CHECK(gl_choice_at(f.c,"context.1.activation.touchpad",GL_SIDE_BOTH,&choice)==GL_OK);CHECK(choice.available);
@@ -331,7 +364,7 @@ static void gameplay_contexts(){
     CHECK(gl_menu_tab_count(f.c)==0);CHECK(gl_gameplay_context_count(f.c)==0);
     CHECK(gl_menu_setting_count(f.c)==gl_setting_count());
     CHECK(!metadata(f.c,"gyro.context").visible);CHECK(!metadata(f.c,"flick.context").visible);
-    CHECK(!metadata(f.c,"activation.short_press").visible);
+    CHECK(!metadata(f.c,"activation.block_long_press").visible);
     gl_choice choice{};gl_choice_at(f.c,"gyro.activation",5,&choice);CHECK(choice.value==double(GL_CONTEXT_ONLY)&&!choice.available);
     f.host.aiming=f.host.alt_fire=1;near(f.tick().yaw_degrees,0); // reserved fields cannot create a view
     char label[]="Bow drawn";f.mode(4000,label,10);label[0]='X';f.mode(21,"Scope",10);f.tick();
@@ -369,7 +402,38 @@ static void gameplay_contexts(){
     out=f.tick({10,30,0});near(out.yaw_degrees,-.6);near(out.pitch_degrees,.7);
     f.state(4000,true,false);f.tick();CHECK(gl_get_active_gameplay_context(f.c)==21);
     f.states.erase(21);CHECK(!f.tick().gyro_active);CHECK(gl_get_active_gameplay_context(f.c)==0);
-    CHECK(!metadata(f.c,"context.4000.sensitivity_x").available);
+    CHECK(metadata(f.c,"context.4000.sensitivity_x").available);
+    CHECK(gl_menu_tab_at(f.c,1,&tab)==GL_OK&&!tab.available&&!tab.active);
+    // Runtime observation gates output, never editing a registered profile.
+    // Compare every setting with the same controller/capabilities across all
+    // three non-running states: inactive, explicitly unavailable and omitted.
+    f.state(4000,true);f.tick();
+    std::map<std::string,std::pair<uint32_t,uint32_t>> editable;
+    for(uint32_t i=0;i<per_mode;++i){gl_setting_info row{};
+        CHECK(gl_menu_tab_setting_at(f.c,4001,i,&row)==GL_OK);
+        editable[row.id]={row.visible,row.available};
+    }
+    const char* inactive_path="gyrolib_inactive_view.ini";
+    CHECK(gl_set_settings_path(f.c,inactive_path)==GL_OK);
+    for(int state=0;state<3;++state){
+        if(state==0)f.state(4000,false);
+        else if(state==1)f.state(4000,true,false);
+        else f.states.erase(4000);
+        const auto inactive=f.tick();CHECK(!inactive.gyro_active);
+        near(inactive.yaw_degrees,0);near(inactive.pitch_degrees,0);
+        CHECK(gl_get_active_gameplay_context(f.c)==0);
+        for(uint32_t i=0;i<per_mode;++i){gl_setting_info row{};
+            CHECK(gl_menu_tab_setting_at(f.c,4001,i,&row)==GL_OK);
+            CHECK(editable.at(row.id)==std::make_pair(row.visible,row.available));
+        }
+        f.set("context.4000.sensitivity_x",5+state);
+        gyrolib::Context restored;CHECK(gl_register_gameplay_context(restored.get(),&renamed)==GL_OK);
+        CHECK(gl_load_settings(restored.get(),inactive_path)==GL_OK);
+        CHECK(gl_setting_get(restored.get(),"context.4000.sensitivity_x",&value)==GL_OK);near(value,5+state);
+        CHECK(gl_get_active_gameplay_context(f.c)==0);
+    }
+    CHECK(gl_set_settings_path(f.c,"")==GL_OK);std::filesystem::remove(inactive_path);
+    f.set("context.4000.sensitivity_x",2);
     f.state(4000,true);CHECK(f.tick().gyro_active);
     f.mode(UINT32_MAX,"Maximum stable ID",-10);f.set("context.4294967295.sensitivity_y",8.6);
     f.set("context.4294967295.gyro.smoothing_ms",120);
@@ -386,7 +450,7 @@ static void gameplay_contexts(){
     gl_setting_get(loaded.c,"context.4000.sensitivity_y",&value);near(value,7);
     gl_setting_get(loaded.c,"context.4294967295.sensitivity_y",&value);near(value,8.6);
     gl_setting_get(loaded.c,"context.4294967295.gyro.smoothing_ms",&value);near(value,120);
-    {std::ofstream file(path);file<<"schema=6\ncontext.4000.sensitivity_x=9\ncontext.21.gyro.space=nan\n";}
+    {std::ofstream file(path);file<<"schema=0.2.0\ncontext.4000.sensitivity_x=9\ncontext.21.gyro.space=nan\n";}
     CHECK(gl_load_settings(loaded.c,path)==GL_INVALID);
     gl_setting_get(loaded.c,"context.4000.sensitivity_x",&value);near(value,2);
     gl_reset_settings(loaded.c);gl_setting_get(loaded.c,"context.4000.sensitivity_x",&value);near(value,2.5);
@@ -418,29 +482,21 @@ static void context_flick(){
     double saved=0;gl_setting_get(f.c,"context.200.flick.mode",&saved);near(saved,GL_FLICK_ON);
     CHECK(!metadata(f.c,"context.200.flick.mode").visible);
 }
-static void profile_migration(){
-    const char* path="gyrolib_profiles_migration.ini";
-    {std::ofstream file(path);file<<"schema=5\ngyro.activation=1\ngyro.context=10\nflick.mode=1\nflick.context=10\ngyro.smoothing_ms=85\ngyro.invert_y=1\ncontext.10.sensitivity_x=4.5\nfuture.setting=keep\n";}
+static void profile_persistence(){
+    const char* path="gyrolib_profiles.ini";
+    {std::ofstream file(path);file<<"schema=0.2.0\ncontext.10.sensitivity_x=4.5\ncontext.20.gyro.activation=6\ncontext.20.gyro.smoothing_ms=85\nfuture.setting=keep\n";}
     Fixture before(false);before.mode(10,"Aim");before.mode(20,"Explore");
     CHECK(gl_load_settings(before.c,path)==GL_OK);CHECK(gl_save_settings(before.c,path)==GL_OK);
     Fixture loaded(false);loaded.mode(10,"Aim");loaded.mode(20,"Explore");
     CHECK(gl_load_settings(loaded.c,path)==GL_OK);double value=0;
     auto get=[&](const char* id){CHECK(gl_setting_get(loaded.c,id,&value)==GL_OK);return value;};
     near(get("context.10.sensitivity_x"),4.5);near(get("context.10.sensitivity_y"),2.5);
-    near(get("context.10.gyro.enabled"),1);near(get("context.20.gyro.enabled"),0);
-    near(get("context.10.gyro.activation"),GL_ALWAYS);
-    near(get("context.10.flick.mode"),GL_FLICK_OFF);near(get("context.20.flick.mode"),GL_FLICK_ON);
-    near(get("context.20.gyro.smoothing_ms"),85);near(get("context.10.gyro.invert_y"),1);
-    loaded.mode(30);near(get("context.30.gyro.smoothing_ms"),0); // new views do not inherit a hidden template
+    near(get("context.20.gyro.activation"),GL_GYRO_OFF);near(get("context.20.gyro.smoothing_ms"),85);
+    loaded.mode(30);near(get("context.30.gyro.smoothing_ms"),0);
     CHECK(gl_unregister_gameplay_context(loaded.c,30)==GL_OK);loaded.states.erase(30);
     CHECK(gl_save_settings(loaded.c,path)==GL_OK);
-    {std::ifstream file(path);std::string text((std::istreambuf_iterator<char>(file)),{});CHECK(text.find("schema=17")!=std::string::npos);CHECK(text.find("future.setting=keep")!=std::string::npos);}
-    {std::ofstream file(path);file<<"schema=2\ngyro.activation=1\nflick.mode=1\ncontext.10.sensitivity_x=4.5\ngyro.aim_multiplier=1.6\n";}
-    CHECK(gl_load_settings(loaded.c,path)==GL_OK);
-    near(get("context.10.gyro.enabled"),0);near(get("context.20.flick.mode"),GL_FLICK_OFF);
-    CHECK(gl_save_settings(loaded.c,path)==GL_OK);
-    {std::ifstream file(path);std::string text((std::istreambuf_iterator<char>(file)),{});CHECK(text.find("gyro.aim_multiplier=1.6")!=std::string::npos);}
-    gl_reset_settings(loaded.c);loaded.mode(30);near(get("context.30.gyro.smoothing_ms"),0);
+    {std::ifstream file(path);std::string text((std::istreambuf_iterator<char>(file)),{});CHECK(text.find("schema=0.2.0")!=std::string::npos);CHECK(text.find("future.setting=keep")!=std::string::npos);}
+    gl_reset_settings(loaded.c);near(get("context.20.gyro.smoothing_ms"),0);
     std::filesystem::remove(path);
 }
 static void independent_profiles(){
@@ -471,9 +527,9 @@ static void independent_profiles(){
     f.set("context.20.gyro.smoothing_ms",0);near(f.tick().yaw_degrees,.6);
     f.set("context.20.gyro.acceleration",3);near(f.tick({0,75,0}).yaw_degrees,4.5);
     f.state(20,false);f.state(10,true);near(f.tick({0,75,0}).yaw_degrees,-.75);
-    CHECK(gl_set_host_capabilities(f.c,GL_HOST_SHORT_PRESS_FILTER)==GL_OK);
+    CHECK(gl_set_host_capabilities(f.c,GL_HOST_LONG_PRESS_BLOCKING)==GL_OK);
     f.set("context.10.gyro.activation",GL_HOLD_DISABLE);
-    f.set("context.10.activation.short_press",1);
+    f.set("context.10.activation.block_long_press",1);
     CHECK(gl_filter_event(f.c,0,GL_PRESS,f.now,1,0)==GL_SUPPRESS);
     f.state(10,false);f.state(20,true);f.tick();
     CHECK(gl_filter_event(f.c,0,GL_RELEASE,f.now,1,0)==GL_SUPPRESS); // no delayed game tap crosses a mode
@@ -595,7 +651,7 @@ static void button_names(){
     CHECK(std::strcmp(gl_get_button_label(f.c,0),"Cross")==0); // paired virtual Xbox label overridden
     CHECK(gl_set_button_label(f.c,2,9,"L1",GL_LABEL_PHYSICAL)==GL_OK);
     CHECK(gl_set_button_label(f.c,2,10,"R1",GL_LABEL_PHYSICAL)==GL_OK);
-    CHECK(gl_choice_at(f.c,"context.1.activation.button",GL_BUTTON_SHOULDERS_BOTH,&choice)==GL_OK);CHECK(std::strcmp(choice.label,"L1 + R1")==0);
+    CHECK(gl_choice_at(f.c,"context.1.activation.button",GL_BUTTON_SHOULDERS_BOTH,&choice)==GL_OK);CHECK(std::strcmp(choice.label,"L1 and R1")==0);
     // Identical commercial names have no effect, and labels do not add buttons.
     gl_endpoint endpoint{};gl_get_endpoint(f.c,0,&endpoint);endpoint.caps.buttons=1;gl_register_endpoint(f.c,&endpoint);
     f.tick();CHECK(gl_choice_at(f.c,"context.1.activation.button",10,&choice)==GL_OK);CHECK(!choice.available);
@@ -621,19 +677,19 @@ static void sensitivity_range(){
     f.state(77,true);out=f.tick({10,30,0});near(out.yaw_degrees,-6);near(out.pitch_degrees,2);
     f.set("context.77.sensitivity_y",19.94);double value=0;gl_setting_get(f.c,"context.77.sensitivity_y",&value);near(value,19.9);
     const char* path="gyrolib_sensitivity_range.ini";CHECK(gl_save_settings(f.c,path)==GL_OK);
-    {std::ifstream in(path);std::string text((std::istreambuf_iterator<char>(in)),{});CHECK(text.find("schema=17")!=std::string::npos);}
+    {std::ifstream in(path);std::string text((std::istreambuf_iterator<char>(in)),{});CHECK(text.find("schema=0.2.0")!=std::string::npos);}
     Fixture restored;CHECK(gl_load_settings(restored.c,path)==GL_OK);restored.mode(77);
     gl_setting_get(restored.c,"context.1.sensitivity_x",&value);near(value,20);
     gl_setting_get(restored.c,"context.77.sensitivity_x",&value);near(value,20);
     gl_setting_get(restored.c,"context.77.sensitivity_y",&value);near(value,19.9);
-    {std::ofstream file(path);file<<"schema=4\ngyro.sensitivity_x=9.8\ncontext.77.sensitivity_y=7.3\ngyro.space=3\n";}
+    {std::ofstream file(path);file<<"schema=0.2.0\ncontext.77.sensitivity_y=7.3\ncontext.1.gyro.space=3\ncontext.1.sensitivity_x=20\n";}
     CHECK(gl_load_settings(restored.c,path)==GL_OK);
-    gl_setting_get(restored.c,"context.1.sensitivity_x",&value);near(value,20); // named sensitivities are independent of the old implicit camera
+    gl_setting_get(restored.c,"context.1.sensitivity_x",&value);near(value,20); // other views retain their own sensitivities
     gl_setting_get(restored.c,"context.77.sensitivity_y",&value);near(value,7.3);
     gl_setting_get(restored.c,"context.1.gyro.space",&value);near(value,GL_SPACE_WORLD);
-    {std::ofstream file(path);file<<"schema=5\ngyro.sensitivity_x=20\ncontext.77.sensitivity_y=20.1\n";}
+    {std::ofstream file(path);file<<"schema=0.2.0\ncontext.1.sensitivity_x=20\ncontext.77.sensitivity_y=20.1\n";}
     CHECK(gl_load_settings(restored.c,path)==GL_INVALID);
-    gl_setting_get(restored.c,"context.1.sensitivity_x",&value);near(value,20); // named sensitivities are independent of the old implicit camera
+    gl_setting_get(restored.c,"context.1.sensitivity_x",&value);near(value,20); // other views retain their own sensitivities
     std::filesystem::remove(path);
 }
 static void cursor_routing(){
@@ -644,8 +700,8 @@ static void cursor_routing(){
     f.host.menu_open=1;f.tick();CHECK(camera.calls==1);near(f.out.yaw_degrees,0);
     CHECK(gl_set_output_target(f.c,GL_OUTPUT_CURSOR)==GL_OK);f.host.camera_allowed=0;
     f.tick();near(f.out.yaw_degrees,0); // no trusted menu observation
-    CHECK(gl_set_host_capabilities(f.c,GL_HOST_MENU_STATE|GL_HOST_NATIVE_STICK_SUPPRESSION|GL_HOST_SHORT_PRESS_FILTER)==GL_OK);
-    f.set("context.1.flick.mode",GL_FLICK_ON);f.controls.right_x=1;f.set("context.1.activation.short_press",1);
+    CHECK(gl_set_host_capabilities(f.c,GL_HOST_MENU_STATE|GL_HOST_NATIVE_STICK_SUPPRESSION|GL_HOST_LONG_PRESS_BLOCKING)==GL_OK);
+    f.set("context.1.flick.mode",GL_FLICK_ON);f.controls.right_x=1;f.set("context.1.activation.block_long_press",1);
     for(int i=0;i<6;++i){f.tick();near(f.out.yaw_degrees,-.3);CHECK(!f.out.suppress_native_right_stick);}
     CHECK(camera.calls==1); // cursor deltas must never leak to the camera callback
     CHECK(gl_filter_event(f.c,0,GL_PRESS,f.now,1,0)==GL_FORWARD);
@@ -666,8 +722,8 @@ static void no_hidden_profile(){
     CHECK(gl_menu_tab_count(f.c)==0);CHECK(gl_menu_tab_at(f.c,0,&tab)==GL_INVALID);
     CHECK(gl_setting_set(f.c,"gyro.sensitivity_x",20)==GL_UNAVAILABLE);
     CHECK(gl_setting_set(f.c,"flick.mode",GL_FLICK_ON)==GL_UNAVAILABLE);
-    CHECK(gl_setting_set(f.c,"activation.short_press",1)==GL_UNAVAILABLE);
-    CHECK(gl_set_host_capabilities(f.c,GL_HOST_NATIVE_STICK_SUPPRESSION|GL_HOST_SHORT_PRESS_FILTER|GL_HOST_MENU_STATE)==GL_OK);
+    CHECK(gl_setting_set(f.c,"activation.block_long_press",1)==GL_UNAVAILABLE);
+    CHECK(gl_set_host_capabilities(f.c,GL_HOST_NATIVE_STICK_SUPPRESSION|GL_HOST_LONG_PRESS_BLOCKING|GL_HOST_MENU_STATE)==GL_OK);
     unsigned callbacks=0;gl_set_camera_callback(f.c,[](void* user,double,double){++*static_cast<unsigned*>(user);},&callbacks);
     f.controls.right_x=1;
     for(int i=0;i<10;++i){auto out=f.tick();near(out.yaw_degrees,0);near(out.pitch_degrees,0);
@@ -686,7 +742,7 @@ static void no_hidden_profile(){
     CHECK(gl_filter_event(f.c,0,GL_RELEASE,f.now,1,0)==GL_FORWARD);
     f.state(7,true,false);near(f.tick().yaw_degrees,0); // unknown observation is not a default view
     f.state(7,true);near(f.tick().yaw_degrees,-.75);CHECK(callbacks==1);
-    f.set("context.7.flick.mode",GL_FLICK_ON);f.set("context.7.gyro.activation",GL_HOLD_DISABLE);f.set("context.7.activation.button",1);f.set("context.7.activation.short_press",1);
+    f.set("context.7.flick.mode",GL_FLICK_ON);f.set("context.7.gyro.activation",GL_HOLD_DISABLE);f.set("context.7.activation.button",1);f.set("context.7.activation.block_long_press",1);
     f.tick();CHECK(f.out.suppress_native_right_stick);
     CHECK(gl_filter_event(f.c,1,GL_PRESS,f.now,1,0)==GL_SUPPRESS);
     f.states.erase(7);near(f.tick().yaw_degrees,0);CHECK(!f.out.suppress_native_right_stick);
@@ -707,7 +763,7 @@ static void cursor_profile_metadata(){
     CHECK(gl_set_gameplay_context_output_target(f.c,20,GL_OUTPUT_CURSOR)==GL_OK);
     CHECK(gl_set_gameplay_context_output_target(f.c,99,GL_OUTPUT_CAMERA)==GL_INVALID);
     CHECK(gl_set_gameplay_context_output_target(f.c,20,99)==GL_INVALID);
-    CHECK(gl_set_host_capabilities(f.c,GL_HOST_NATIVE_STICK_SUPPRESSION|GL_HOST_MENU_STATE|GL_HOST_SHORT_PRESS_FILTER)==GL_OK);
+    CHECK(gl_set_host_capabilities(f.c,GL_HOST_NATIVE_STICK_SUPPRESSION|GL_HOST_MENU_STATE|GL_HOST_LONG_PRESS_BLOCKING)==GL_OK);
     f.state(10,true);f.prime();
     CHECK(metadata(f.c,"context.10.flick.mode").visible);
     CHECK(!metadata(f.c,"context.10.flick.duration_ms").visible);
@@ -716,7 +772,7 @@ static void cursor_profile_metadata(){
     CHECK(!metadata(f.c,"context.20.flick.mode").visible&&!metadata(f.c,"context.20.flick.mode").available);
     CHECK(!metadata(f.c,"context.20.flick.duration_ms").visible);
     gl_choice choice{};CHECK(gl_choice_at(f.c,"context.20.flick.mode",GL_FLICK_ON,&choice)==GL_OK&&!choice.available);
-    f.set("context.20.flick.mode",GL_FLICK_ON);f.set("context.20.activation.short_press",1); // old saved values stay inert
+    f.set("context.20.flick.mode",GL_FLICK_ON);f.set("context.20.activation.block_long_press",1); // old saved values stay inert
     unsigned callbacks=0;gl_set_camera_callback(f.c,[](void* user,double,double){++*static_cast<unsigned*>(user);},&callbacks);
     f.state(10,false);f.state(20,true);f.host.menu_open=1;f.host.camera_allowed=0;
     f.controls.right_x=1;near(f.tick().yaw_degrees,-.75);CHECK(gl_get_output_target(f.c)==GL_OUTPUT_CURSOR);
@@ -732,12 +788,12 @@ static void cursor_profile_metadata(){
     CHECK(metadata(f.c,"context.20.flick.mode").visible);
 }
 static void activation_split(){
-    Fixture f;f.device();f.prime();gl_set_host_capabilities(f.c,GL_HOST_SHORT_PRESS_FILTER);
+    Fixture f;f.device();f.prime();gl_set_host_capabilities(f.c,GL_HOST_LONG_PRESS_BLOCKING);
     f.set("context.1.activation.button",1);f.set("context.1.activation.touchpad",GL_SIDE_EITHER);f.set("context.1.activation.stick_touch",GL_SIDE_EITHER);
-    f.set("context.1.activation.grip_touch",GL_SIDE_EITHER);f.set("context.1.activation.stick_deflection",GL_SIDE_EITHER);f.set("context.1.activation.short_press",1);
+    f.set("context.1.activation.grip_touch",GL_SIDE_EITHER);f.set("context.1.activation.stick_deflection",GL_SIDE_EITHER);f.set("context.1.activation.block_long_press",1);
     f.controls.buttons=1;f.controls.touchpads=f.controls.stick_touch=f.controls.grip_touch=GL_LEFT;f.controls.right_x=1;
     CHECK(f.tick().gyro_active); // remembered bindings must not gate Always on
-    const char* controls[]={"context.1.activation.button","context.1.activation.touchpad","context.1.activation.stick_touch","context.1.activation.grip_touch","context.1.activation.stick_deflection","context.1.activation.stick_threshold","context.1.activation.short_press"};
+    const char* controls[]={"context.1.activation.button","context.1.activation.touchpad","context.1.activation.stick_touch","context.1.activation.grip_touch","context.1.activation.stick_deflection","context.1.activation.stick_threshold","context.1.activation.block_long_press"};
     for(auto id:controls)CHECK(!metadata(f.c,id).visible&&!metadata(f.c,id).available);
     CHECK(gl_filter_event(f.c,0,GL_PRESS,f.now,1,0)==GL_FORWARD);
     CHECK(gl_filter_event(f.c,0,GL_RELEASE,f.now,1,0)==GL_FORWARD);
@@ -748,15 +804,15 @@ static void activation_split(){
     f.controls.buttons=1;CHECK(f.tick().gyro_active);CHECK(!metadata(f.c,"context.20.activation.button").visible);
     f.set("context.20.gyro.activation",GL_HOLD_DISABLE);CHECK(!f.tick().gyro_active);
     f.controls.buttons=0;CHECK(f.tick().gyro_active);
-    const char* path="gyrolib_activation_migration.ini";
-    const std::string old="schema=6\ngyro.activation=0\nactivation.button=1\ncontext.20.gyro.activation=0\ncontext.20.activation.touchpad=3\ncontext.30.gyro.activation=0\n";
+    const char* path="gyrolib_activation_modes.ini";
+    const std::string old="schema=0.2.0\ncontext.1.gyro.activation=5\ncontext.1.activation.button=1\ncontext.20.gyro.activation=5\ncontext.20.activation.touchpad=3\ncontext.30.gyro.activation=0\n";
     {std::ofstream file(path);file<<old;}
     CHECK(gl_load_settings(f.c,path)==GL_OK);double value=0;
     gl_setting_get(f.c,"context.1.gyro.activation",&value);near(value,GL_HOLD_DISABLE);
     gl_setting_get(f.c,"context.20.gyro.activation",&value);near(value,GL_HOLD_DISABLE);
     {std::ifstream file(path);CHECK(std::string((std::istreambuf_iterator<char>(file)),{})==old);} // loading is read-only
     f.mode(30);gl_setting_get(f.c,"context.30.gyro.activation",&value);near(value,GL_ALWAYS);
-    f.set("context.20.gyro.activation",GL_ALWAYS); // schema 7 retains ignored bindings without migrating again
+    f.set("context.20.gyro.activation",GL_ALWAYS); // Always on retains its ignored bindings when reloaded
     Fixture roundtrip;CHECK(gl_load_settings(roundtrip.c,path)==GL_OK);roundtrip.mode(20);
     gl_setting_get(roundtrip.c,"context.20.gyro.activation",&value);near(value,GL_ALWAYS);
     gl_setting_get(roundtrip.c,"context.20.activation.touchpad",&value);near(value,GL_SIDE_EITHER);
@@ -803,9 +859,9 @@ static void automatic_persistence(){
     gl_setting_get(f.c,"context.10.sensitivity_x",&value);near(value,6);CHECK(gl_get_settings_save_result(f.c)==GL_IO_ERROR);
     gl_set_settings_path(f.c,path);CHECK(gl_action(f.c,"settings.save")==GL_OK);CHECK(gl_get_settings_save_result(f.c)==GL_OK);
     CHECK(gl_load_settings(restored.c,path)==GL_OK);gl_setting_get(restored.c,"context.10.sensitivity_x",&value);near(value,6);
-    {std::ofstream file(path);file<<"schema=999\nfuture=preserve\n";}
+    {std::ofstream file(path);file<<"schema=999.0.0\nfuture=preserve\n";}
     CHECK(gl_setting_set(f.c,"calibration.automatic",2)==GL_NEWER_SCHEMA);CHECK(gl_get_settings_save_result(f.c)==GL_NEWER_SCHEMA);
-    {std::ifstream file(path);CHECK(std::string((std::istreambuf_iterator<char>(file)),{})=="schema=999\nfuture=preserve\n");}
+    {std::ifstream file(path);CHECK(std::string((std::istreambuf_iterator<char>(file)),{})=="schema=999.0.0\nfuture=preserve\n");}
     std::filesystem::remove(path);
 }
 static void motion_companions(){
@@ -902,15 +958,18 @@ static void companion_activators(){
     gl_set_host_capabilities(f.c,GL_HOST_NATIVE_STICK_SUPPRESSION);
     f.set("context.1.flick.mode",GL_FLICK_ON);f.set("context.1.flick.duration_ms",0);physical.right_x=0;f.controls.right_x=0;update();
     f.controls.right_x=1;update();CHECK(f.out.suppress_native_right_stick);CHECK(std::abs(f.out.yaw_degrees)>80);
-    // Duplicate contact buttons migrate to the dedicated family, preserving OR.
-    CHECK(gl_set_button_contact(f.c,81,25,GL_CONTACT_GRIP,GL_RIGHT)==GL_OK);
+    // Duplicate contacts resolve on this device without changing saved bindings.
     f.mode(10);f.set("context.10.activation.button",26);f.set("context.10.activation.grip_touch",GL_SIDE_LEFT);
     f.set("context.1.activation.button",26);f.set("context.1.activation.grip_touch",GL_SIDE_OFF);
+    CHECK(gl_set_button_contact(f.c,81,25,GL_CONTACT_GRIP,GL_RIGHT)==GL_OK);
     physical.buttons=1u<<25;physical.grip_touch=GL_RIGHT;update();double value=0;
-    CHECK(gl_setting_get(f.c,"context.1.activation.button",&value)==GL_OK);near(value,0);
-    CHECK(gl_setting_get(f.c,"context.1.activation.grip_touch",&value)==GL_OK);near(value,GL_SIDE_RIGHT);
-    CHECK(gl_setting_get(f.c,"context.10.activation.button",&value)==GL_OK);near(value,0);
-    CHECK(gl_setting_get(f.c,"context.10.activation.grip_touch",&value)==GL_OK);near(value,GL_SIDE_EITHER);
+    CHECK(gl_setting_get(f.c,"context.1.activation.button",&value)==GL_OK);near(value,26);
+    CHECK(gl_setting_get(f.c,"context.1.activation.grip_touch",&value)==GL_OK);near(value,GL_SIDE_OFF);
+    CHECK(gl_setting_get(f.c,"context.10.activation.button",&value)==GL_OK);near(value,26);
+    CHECK(gl_setting_get(f.c,"context.10.activation.grip_touch",&value)==GL_OK);near(value,GL_SIDE_LEFT);
+    CHECK(gl_setting_get_effective(f.c,"context.1.activation.button",&value)==GL_OK);near(value,0);
+    CHECK(gl_setting_get_effective(f.c,"context.1.activation.grip_touch",&value)==GL_OK);near(value,GL_SIDE_RIGHT);
+    CHECK(gl_setting_get_effective(f.c,"context.10.activation.grip_touch",&value)==GL_OK);near(value,GL_SIDE_EITHER);
     for(const char* key:{"context.1.activation.button","context.10.activation.button"}){
         gl_choice choice{};CHECK(gl_choice_at(f.c,key,26,&choice)==GL_OK);CHECK(!choice.available);
         CHECK(gl_choice_at(f.c,key,9,&choice)==GL_OK);CHECK(choice.available);
@@ -990,9 +1049,9 @@ static void touchpad_flick(){
     CHECK(!feedback());
     gl_choice_at(f.c,"context.10.flick.mode",GL_FLICK_TOUCHPAD,&choice);CHECK(!choice.available);
     input.touchpad_x=std::numeric_limits<float>::quiet_NaN();CHECK(gl_submit_flick_input(f.c,1,&input)==GL_INVALID);
-    // Old ON keeps its stable value; new modes survive a settings round trip.
+    // Stick and Either modes survive a settings round trip.
     const auto path=(std::filesystem::temp_directory_path()/"gyrolib-flick-input-test.ini").string();
-    {std::ofstream file(path);file<<"schema=7\nflick.mode=2\n";}Fixture loaded;
+    {std::ofstream file(path);file<<"schema=0.2.0\ncontext.1.flick.mode=2\n";}Fixture loaded;
     CHECK(gl_load_settings(loaded.c,path.c_str())==GL_OK);double value=0;gl_setting_get(loaded.c,"context.1.flick.mode",&value);near(value,GL_FLICK_ON);
     loaded.set("context.1.flick.mode",GL_FLICK_BOTH);Fixture roundtrip;CHECK(gl_load_settings(roundtrip.c,path.c_str())==GL_OK);
     gl_setting_get(roundtrip.c,"context.1.flick.mode",&value);near(value,GL_FLICK_BOTH);std::filesystem::remove(path);
@@ -1017,11 +1076,56 @@ static void choice_help(){
     CHECK(!*gl_choice_description(f.c,"context.1.gyro.space",99));CHECK(!*gl_choice_description(f.c,"context.1.gyro.space",.5));
     CHECK(!*gl_choice_description(f.c,"missing",0));CHECK(!*gl_choice_description(nullptr,"context.1.gyro.space",0));
 }
+static void menu_camera_routing(){
+    Fixture f;f.device();f.prime();f.host.menu_open=1;
+    int recentered=0;
+    gl_set_recenter_callback(f.c,[](void* p){++*static_cast<int*>(p);},&recentered);
+    const auto caps=GL_HOST_MENU_STATE|GL_HOST_NATIVE_STICK_SUPPRESSION|GL_HOST_LONG_PRESS_BLOCKING;
+    CHECK(gl_set_host_capabilities(f.c,caps)==GL_OK);
+    near(f.tick().yaw_degrees,0); // unchanged default for existing integrations
+    CHECK(gl_set_gameplay_context_camera_in_menu(nullptr,1,1)==GL_INVALID);
+    CHECK(gl_set_gameplay_context_camera_in_menu(f.c,99,1)==GL_INVALID);
+    CHECK(gl_set_gameplay_context_camera_in_menu(f.c,1,2)==GL_INVALID);
+    CHECK(gl_set_gameplay_context_camera_in_menu(f.c,1,1)==GL_OK);
+    near(f.tick().yaw_degrees,-.3);
+    gl_gameplay_context renamed{1,"Renamed camera","New localized metadata",0};
+    CHECK(gl_register_gameplay_context(f.c,&renamed)==GL_OK);
+    near(f.tick().yaw_degrees,-.3);
+    CHECK(gl_request_recenter(f.c)==GL_OK);f.tick();CHECK(recentered==1);
+    f.set("context.1.gyro.activation",GL_GYRO_OFF);near(f.tick().yaw_degrees,0);
+    f.set("context.1.flick.mode",GL_FLICK_ON);f.set("context.1.flick.duration_ms",0);
+    f.tick({});f.controls.right_x=1;near(f.tick({}).yaw_degrees,90);CHECK(f.out.suppress_native_right_stick);
+    for(auto flag:{&f.host.paused,&f.host.focused,&f.host.camera_allowed}){
+        const auto previous=*flag;*flag=flag==&f.host.paused?1:0;
+        gl_request_recenter(f.c);near(f.tick().yaw_degrees,0);CHECK(!f.out.suppress_native_right_stick);
+        *flag=previous;f.tick({});CHECK(recentered==1); // discarded, never replayed
+    }
+    gl_set_panel_open(f.c,1);gl_request_recenter(f.c);f.tick();CHECK(!f.out.suppress_native_right_stick&&recentered==1);
+    gl_set_panel_open(f.c,0);
+    gl_set_host_capabilities(f.c,GL_HOST_NATIVE_STICK_SUPPRESSION);near(f.tick().yaw_degrees,0);CHECK(!f.out.suppress_native_right_stick);
+    gl_set_host_capabilities(f.c,caps);
+    CHECK(gl_set_gameplay_context_camera_in_menu(f.c,1,0)==GL_OK);f.tick();CHECK(!f.out.suppress_native_right_stick);
+    CHECK(gl_set_gameplay_context_camera_in_menu(f.c,1,1)==GL_OK);
+    f.state(1,false);f.tick();CHECK(!f.out.suppress_native_right_stick);
+    f.state(1,true,false);f.tick();CHECK(!f.out.suppress_native_right_stick);
+    f.state(1,true);f.set("context.1.flick.mode",GL_FLICK_OFF);f.set("context.1.gyro.activation",GL_ALWAYS);
+    gl_set_gameplay_context_output_target(f.c,1,GL_OUTPUT_CURSOR);gl_request_recenter(f.c);
+    near(f.tick().yaw_degrees,-.3);CHECK(recentered==1&&!f.out.suppress_native_right_stick);
+    gl_set_gameplay_context_output_target(f.c,1,GL_OUTPUT_CAMERA);
+    f.set("context.1.gyro.activation",GL_HOLD);f.set("context.1.activation.button",1);f.set("context.1.activation.block_long_press",1);
+    f.tick();CHECK(gl_filter_event(f.c,0,GL_PRESS,f.now,1,0)==GL_FORWARD);
+    CHECK(gl_unregister_gameplay_context(f.c,1)==GL_OK);f.mode(1);f.state(1,true);near(f.tick().yaw_degrees,0);
+    Fixture calibration;calibration.device();calibration.host.menu_open=1;
+    gl_set_host_capabilities(calibration.c,GL_HOST_MENU_STATE);gl_set_gameplay_context_camera_in_menu(calibration.c,1,1);
+    calibration.set("calibration.automatic",GL_CAL_MENUS);
+    for(int i=0;i<1200;++i)calibration.tick({0,.5f,0});
+    gl_diagnostics d{};gl_get_diagnostics(calibration.c,&d);near(d.bias.y,0);
+}
 int main(){
     unsigned failures=0;
-    for(auto test:{temporal,gains_and_spaces,activation,source_selection,calibration,noisy_calibration,flick,short_press,settings,gameplay_contexts,context_flick,steam_adapter,gyro_spaces,button_names,sensitivity_range,cursor_routing,profile_migration,independent_profiles,no_hidden_profile,cursor_profile_metadata,activation_split,shared_toggle,automatic_persistence,motion_companions,automatic_motion_sensor,companion_activators,controller_takeover,touchpad_flick,choice_help}){
+    for(auto test:{gamepad_menu_shortcut,temporal,gains_and_spaces,activation,source_selection,calibration,noisy_calibration,flick,block_long_press,settings,gameplay_contexts,context_flick,steam_adapter,gyro_spaces,button_names,sensitivity_range,cursor_routing,profile_persistence,independent_profiles,no_hidden_profile,cursor_profile_metadata,activation_split,shared_toggle,automatic_persistence,motion_companions,automatic_motion_sensor,companion_activators,controller_takeover,touchpad_flick,choice_help,menu_camera_routing}){
         try{test();}catch(const std::exception& e){std::cerr<<e.what()<<'\n';++failures;}
     }
     if(failures)return 1;
-    std::cout<<"29 core regression groups passed (synthetic samples; no physical controller validation).\n";return 0;
+    std::cout<<"30 core regression groups passed (synthetic samples; no physical controller validation).\n";return 0;
 }

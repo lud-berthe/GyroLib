@@ -1,169 +1,130 @@
-# Host-defined view profiles
+# View profiles
 
-GyroLib has no built-in Aim or Alt-Fire action. The host registers its own named
-view modes with permanent nonzero uint32 IDs. Every mode gets an independent
-settings profile and menu tab. The highest-priority available, active mode selects
-the **whole profile**; ties use the lowest ID. The host declares its normal view
-as a mode too, even when it is the only camera. Without a valid active observation, gyro,
-flick and input filtering stop; calibration and orientation tracking continue.
-Looking at a menu tab only edits settings; it never changes
-gameplay state or selects the processing profile.
+[Documentation](INDEX.md) / Integration
 
-## Registration and observation
+The mod defines its views: exploration, weapon aim, inventory cursor, or any other
+mode the game needs. The API calls a view a gameplay context. Each has a
+permanent nonzero uint32 ID, a name, a
+settings profile and a menu tab. There is no built-in Aim, Alt-Fire or unnamed
+camera profile.
+
+Before every update, report which views are active and whether those observations
+are reliable. The highest-priority available active view supplies the whole
+profile; the lowest ID breaks a tie. Missing observations expire on update.
+Without a valid active view, movement and input filtering stop, while orientation
+tracking and calibration continue.
+
+## Register and report
 
 ```cpp
 constexpr uint32_t Explore = 101, Aim = 205, Inventory = 309;
-const gl_gameplay_context modes[] = {
-    {Explore, "Exploration", "Free third-person camera.", 10},
-    {Aim, "Aiming", "The resolved aim command is held.", 20},
-    {Inventory, "Inventory cursor", "The inventory is open.", 30}
+const gl_gameplay_context views[] = {
+    {Explore, "Exploration", "Look around while exploring.", 10},
+    {Aim, "Aiming", "Aim your weapon.", 20},
+    {Inventory, "Inventory cursor", "Move the inventory cursor.", 30}
 };
-for (const auto& mode : modes)
-    check(gl_register_gameplay_context(gyro, &mode));
+for (const auto& view : views)
+    check(gl_register_gameplay_context(gyro, &view));
 check(gl_set_gameplay_context_output_target(gyro, Explore, GL_OUTPUT_CAMERA));
 check(gl_set_gameplay_context_output_target(gyro, Aim, GL_OUTPUT_CAMERA));
 check(gl_set_gameplay_context_output_target(gyro, Inventory, GL_OUTPUT_CURSOR));
 check(gl_setting_set(gyro, "context.205.sensitivity_x", 1.0));
 check(gl_setting_set(gyro, "context.205.sensitivity_y", 1.0));
-check(gl_setting_set(gyro, "context.101.flick.mode", GL_FLICK_ON));
 
-// Before EACH gl_update, from resolved game commands, without changing them:
+// Before each update, using the game's resolved commands:
 check(gl_set_gameplay_context_state(gyro, Explore, !aim && !inventory, state_known));
 check(gl_set_gameplay_context_state(gyro, Aim, aim && !inventory, state_known));
 check(gl_set_gameplay_context_state(gyro, Inventory, inventory, state_known));
-gl_update(gyro, now_ns, &host, &output);
-uint32_t processing_mode = gl_get_active_gameplay_context(gyro); // 0 = no active named mode
+check(gl_update(gyro, now_ns, &host, &output));
 ```
 
-Registration copies strings. Re-register the same ID to rename/localize a mode or
-change its priority; settings and observations survive. Unregistering hides the
-tab but retains saved values. IDs must never come from translated labels or list
-positions. There is no small hard-coded mode count limit.
+This is an integration fragment; `check` handles result codes and the host supplies
+command observations and `gl_host_state`. Use 0 or 1 for active/available.
+Available means the observation is valid, even when inactive. Read commands before
+animation delays so aim transitions affect sensitivity immediately.
 
-Report active and available as 0 or 1. Available means the observation is valid
-even if currently inactive. Missing reports expire at the next update. An
-unavailable mode cannot select a profile; another valid active mode applies, or
-output is suspended. The library never infers aiming from animation, and never issues aim
-commands. All calls use the context's serialized owner thread.
+Registration copies strings. Re-registering an ID changes its name, description
+or priority while preserving settings and observations. Unregistering removes
+the tab but retains saved values. Use fixed IDs, never translated names or list
+positions. The API has no small fixed limit on the number of views.
 
-## Independent settings
+## Settings per view
 
-Each named profile includes gyro enable, absolute X/Y sensitivity, inversion,
-all nine spaces and local-axis parameters, activation and its control families,
-stick threshold, optional short-press filtering, smoothing, acceleration,
-flick enable and pivot duration. Calibration and UI settings remain shared.
+View keys begin with `context.<id>.`, for example:
 
-Sensitivity IDs remain `context.<id>.sensitivity_x/y` for compatibility.
-Other IDs append the base key, e.g. `context.205.gyro.invert_x`,
-`context.101.activation.button`, `context.101.flick.duration_ms`.
-New profiles use library defaults (sensitivity 2.5, Player Space, gyro enabled,
-Always on, flick off); hosts may set their initial values before loading a file.
-There is no unnamed Camera profile. Bare gyro/activation/flick setting IDs now
-return `GL_UNAVAILABLE` from setters/getters; use the registered view's ID.
-Static metadata slots are retained but hidden for ABI stability. Old INI values
-are read only for migration, then omitted from subsequent saves.
+```text
+context.205.sensitivity_x
+context.205.gyro.invert_x
+context.205.activation.button
+context.205.flick.duration_ms
+```
 
-Declare each destination with `gl_set_gameplay_context_output_target` after
-registration. This integration metadata is not a player preference and is not
-saved in the settings file. The winning mode selects its destination automatically.
-A cursor profile hides flick and pivot duration, ignores any old saved flick On
-value, never suppresses native stick rotation, and never calls the camera callback.
-It still requires reliable host menu observation and the usual focus/pause gates.
-Undeclared legacy modes continue using the dynamic `gl_set_output_target` API.
+New views default to Player Space, X/Y sensitivity 2.5, Always on and Flick Off.
+Apply mod defaults before loading the player's settings. Profiles can
+[inherit another view](INHERITANCE.md); calibration, language and the shortcut
+are shared preferences.
 
-Within a tab, activation choices are Off, Always on, Hold to disable, Hold to enable
-and Toggle. Off stops gyro while preserving independent flick processing.
-Always on hides and ignores all activators and short-press filtering;
-switching to another activation mode restores the saved bindings.
-Flick choices select Off, the right stick, the right touchpad or both physical
-controls, when the host can suppress their native camera output. There is no
-"during/outside selected mode" choice. The existing global conditional enum values
-and selectors remain deprecated API compatibility only; menus do not offer them.
-Context-specific setters reject those conditional values.
+Activation Mode offers Off, Always on, Hold to disable, Hold to enable and Toggle.
+Off stops gyro but leaves independent flick processing available. Always on
+ignores activators and long-press blocking while retaining their saved bindings.
+Bare gyro/activation/flick setting IDs return
+`GL_UNAVAILABLE`; use a registered view's keys.
 
-Capabilities still control availability: flick requires suppression for each
-selected native input, short press requires a filter integration, and controls appear only
-when provided by the selected physical controller. Each tab uses its own space
-and stick-binding settings for dependent-row visibility. An unavailable host
-observation leaves the tab visible with disabled settings.
+## Camera and cursor destinations
 
-Mode changes apply on the next update without resetting orientation or bias.
-Toggle's live on/off state is shared across all views using Toggle, including
-cursor views. Switching through a non-Toggle view does not change that state.
-It starts on when the library context is created and is not a saved preference.
-Entering a mode with a held button creates no toggle edge. A short-press hold
-cannot emit a delayed game action after a mode
-transition. Returning to a flick-enabled mode with a deflected stick skips the
-initial pivot and permits circular rotation immediately. Focus/menu interruptions
-and explicit flick setting changes still require neutral before a pivot.
+Declare the destination after registration. It is host metadata, not a saved
+player setting. The winning view selects it automatically. Views without an
+explicit destination follow the legacy dynamic `gl_set_output_target` default.
 
-## Shared menu tabs and strings
+| Destination | Output and gates |
+|---|---|
+| Camera | Camera callback or returned angular deltas; requires `camera_allowed`, focus, no pause and a closed settings panel |
+| Cursor | Returned angular deltas for local UI; requires an observed open menu, `GL_HOST_MENU_STATE`, focus, no pause and a closed settings panel |
 
-Use `gl_menu_tab_count` / `gl_menu_tab_at`, then
-`gl_menu_tab_setting_count` / `gl_menu_tab_setting_at`.
-Tab IDs are stable **uint64** values: mode ID + 1 for named
-profiles. The maximum uint32 mode ID therefore has tab ID 4294967296.
-`gl_menu_tab.context_id` remains the original host ID;
-`.active` indicates the processing profile, not the tab being edited.
-Zero registered views means zero tabs. ID 1 (`GL_TAB_CAMERA` / `GL_TAB_DEFAULT`)
-is retired and never enumerated; querying its settings returns zero rows.
-Shared calibration and reset-all actions are enumerated separately
-with `gl_menu_shared_setting_count` / `gl_menu_shared_setting_at`. There is no
-General tab; legacy tab-0 getters still alias shared controls. The F10 frontend
-places language in its title bar, controller selection above the view tabs, and
-calibration/reset controls in one compact footer row. Scaling is always automatic;
-the retired scale row is hidden and its old saved value is discarded on migration. Edits
-persist automatically to the configured path; there is no Save widget. Respect action visibility to swap
-Recalibrate for Cancel throughout manual calibration, including movement retries.
+Cursor views exclude flick, native camera-stick suppression, recenter and zoom
+compensation. A saved flick preference remains intact but has no effect there.
+The host maps cursor angles to UI coordinates and handles selection. It must
+continue reporting the actual menu state.
 
-Setting IDs, bounds, types, defaults, descriptions and choice APIs are identical
-for native widgets and F10. Tab rows use concise labels; flat enumeration remains
-available and prefixes named-mode row labels for older menu consumers.
-Use choice.value, never its list index. `GL_EVENT_SETTING` identifies edited keys;
-rebuild metadata on `GL_EVENT_CONTEXT` / `GL_EVENT_HOST_CAPABILITIES` and update
-control labels on `GL_EVENT_BUTTON_LABELS`.
+Camera output normally stops in menus. For a movable background camera, call
+`gl_set_gameplay_context_camera_in_menu(gyro, view_id, 1)` and declare reliable
+`GL_HOST_MENU_STATE` support. Ordinary camera gates still apply. This opt-in
+survives metadata re-registration and is cleared when the view is unregistered.
+Long-press blocking remains disabled in menus. Menus-only calibration does not
+treat an enabled menu camera as idle.
 
-Metadata strings are borrowed until registration/removal, language change or
-destruction. Copy strings that you retain. The host localizes its tab names by
-re-registering the same IDs; library labels localize independently.
+## Transitions
 
-## Persistence and migration
+View changes apply on the next update without resetting orientation or bias.
+Toggle's live on/off state is shared across all Toggle views, including cursor
+views. It starts on, is not saved and survives a visit to a non-Toggle view.
+Entering a view with an activator already held creates no toggle edge. Pending
+taps cannot trigger a game action after a view transition.
 
-The current format writes only shared language, menu shortcut and automatic calibration,
-plus `context.<id>.*` profiles and any preserved unknown extension keys. The schema
-number is format metadata. Per-view values survive temporary unregistration.
-Global gyro/activation/flick keys, old mode selectors, `ui.scale` and the old
-migration template are no longer emitted. Existing named profiles retain their
-values; unused global values in schema 6..9 files never override them.
+Returning to a flick-enabled view while the stick is deflected skips the initial
+pivot and allows circular turning immediately. Focus/menu interruptions and
+explicit flick-setting changes require neutral before a new pivot.
 
-Declare all current views and their host defaults before initialization/loading.
-An old implicit-only config with no named profile keys can migrate only when
-exactly one view is registered. Otherwise loading returns `GL_UNAVAILABLE`
-transactionally; initialization also disables auto-save and leaves the file intact.
-The host can register its intended camera first, migrate once, then register other
-new views. The library never guesses a destination for an unlabelled old profile.
+## Menu tabs and saved profiles
 
-Earlier schemas remain readable. Old combined Always-on mode with
-bindings or a short-press filter migrates to Hold to disable (5); without these it
-becomes Always on (0). New Always-on profiles retain but ignore their bindings.
-Their mode sensitivity IDs and values are retained;
-global gyro/flick preferences are copied once into each mode as independent
-values. Missing legacy mode axes default to 2.5, as in the previous schema.
+A settings tab edits a view; it never activates it. Registered views remain
+editable even when inactive, unavailable or not yet observed. `tab.active` and
+`tab.available` describe runtime observations, not widget availability. Use each
+setting's hardware/host availability metadata to disable widgets.
 
-Legacy conditional activation is converted by the referenced stable mode ID:
-"only X" enables X and disables other profiles; "outside X" does the reverse.
-Flick conditions similarly become per-profile On/Off. This matches mutually
-exclusive view modes. If the old mod reported overlapping command states, the
-new winning-profile model can change their combined behavior: review those
-profiles after migration. Missing legacy selectors leave the affected feature
-disabled. Old aim/Alt-Fire multipliers remain inert preserved data.
+Tab IDs are uint64 values equal to view ID + 1. View 4294967295 therefore has tab
+4294967296. With no registered views there are no tabs. Query shared settings
+separately; [Menus](MENUS.md#enumerate-the-model) describes iteration and notifications.
 
-Pre-schema-6 shared settings and an old migration template are materialized into
-the views registered at migration time and profile IDs already present in the file.
-Views introduced later start with defaults; no hidden template is saved. Reset-all
-resets every stored profile, including retired modes, but keeps language/shortcut.
-`gl_load_settings` remains read-only. `gl_initialize_settings` additionally rewrites
-a valid older file in the current schema after migration; current files are only read.
-Malformed/newer files are refused transactionally; unknown keys survive.
-Older DLLs refuse newer schemas instead of overwriting them. See [MENUS.md](MENUS.md) for atomic save
-and ownership requirements.
+View metadata strings are borrowed until registration/removal, language changes
+or destruction. Copy retained strings. To localize a view, re-register its name
+and description under the same ID.
+
+Saved profiles for temporarily unregistered views are retained. Independent
+profiles store their settings; inherited ones store a parent and exceptions.
+See [settings](SETTINGS.md) for loading/saving and [inheritance](INHERITANCE.md)
+for detachment, recommendations and per-setting overrides.
+
+---
+
+Previous: [Host integration](API.md) · Next: [Settings and INI](SETTINGS.md)

@@ -41,11 +41,28 @@ typedef const char* (GL_CALL *gl_steam_button_label_callback)(void*,uint64_t han
 GL_STEAM_API int32_t GL_CALL gl_steam_set_button_label_provider(gl_steam*,gl_steam_button_label_callback,void* user);
 GL_STEAM_API void GL_CALL gl_steam_destroy(gl_steam*);
 /* Once per host Steam frame, on the context owner thread. A repeated frame
- * serial is a no-op. now_ns must increase between new frames. Invalid provider
+ * serial is rejected with GL_INVALID. now_ns must increase between new frames. Invalid provider
  * handles, non-finite motion, and out-of-range controls return a C error code;
  * do not ignore it. All callbacks and their user data outlive the adapter. */
 GL_STEAM_API int32_t GL_CALL gl_steam_poll(gl_steam*,uint64_t now_ns,uint64_t host_frame_serial);
 GL_STEAM_API uint64_t GL_CALL gl_steam_endpoint_for_handle(const gl_steam*,uint64_t handle);
+
+/* Optional Windows x64 bridge to an ALREADY loaded steam_api64.dll. It borrows
+ * the game's initialized/updated Steam Input service; no SDK or Valve binary is
+ * bundled. It never calls Init, RunFrame, Shutdown or changes action sets.
+ * The host must arrange polling after its Steam frame update on the context
+ * owner thread. SDL should be polled first, then this reader, then gl_update.
+ * Do not also attach a gl_steam provider to the same context.
+ * Creation does not load or initialize Steam. Poll retries when Steam is absent;
+ * GL_UNAVAILABLE is a normal degraded state, not a reason to stop SDL/update.
+ * Context outlives reader. Destroy before the host shuts its Steam service down.
+ * Other platforms currently return NULL. Linux/Proton support is unverified. */
+typedef struct gl_steam_runtime gl_steam_runtime;
+GL_STEAM_API gl_steam_runtime* GL_CALL gl_steam_runtime_create(gl_context*);
+GL_STEAM_API void GL_CALL gl_steam_runtime_destroy(gl_steam_runtime*);
+GL_STEAM_API int32_t GL_CALL gl_steam_runtime_poll(gl_steam_runtime*,uint64_t now_ns,uint64_t host_frame_serial);
+/* Borrowed diagnostic text, valid until the next call on this reader. */
+GL_STEAM_API const char* GL_CALL gl_steam_runtime_error(const gl_steam_runtime*);
 #ifdef __cplusplus
 }
 #endif

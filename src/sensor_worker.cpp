@@ -102,6 +102,11 @@ int main(int argc,char** argv){
     SDL_SetHintWithPriority(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT,"",SDL_HINT_OVERRIDE);
     SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1",SDL_HINT_OVERRIDE);
 #ifdef GL_SENSOR_FIXTURE
+    // Protocol tests use only virtual devices. Do not enumerate/open the user's
+    // real controllers or wait on their Windows driver services in a fixture.
+    for(const char* hint:{SDL_HINT_JOYSTICK_HIDAPI,SDL_HINT_JOYSTICK_RAWINPUT,SDL_HINT_JOYSTICK_DIRECTINPUT,
+        SDL_HINT_JOYSTICK_WGI,SDL_HINT_JOYSTICK_GAMEINPUT,SDL_HINT_XINPUT_ENABLED})
+        SDL_SetHintWithPriority(hint,"0",SDL_HINT_OVERRIDE);
     SDL_SetHintWithPriority(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT,
         (std::strncmp(sensor_fixture_case(),"contacts",8)==0||std::strcmp(sensor_fixture_case(),"flick-stream")==0)?"0x28de/0x1304":"0xffff/0xfffe",SDL_HINT_OVERRIDE);
 #endif

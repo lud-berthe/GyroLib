@@ -7,7 +7,7 @@ static bool sensor_fixture_send(gyrolib_sensor::Record r){
     using namespace gyrolib_sensor;const char* mode=sensor_fixture_case();
     if(std::strcmp(mode,"bad")==0)r.revision=999;
     if(std::strcmp(mode,"stale")==0&&(r.kind==Motion||r.kind==Controls))r.observed_ns=1;
-    if(std::strcmp(mode,"fragment")==0){
+    if(std::strncmp(mode,"fragment",8)==0){
         if(std::fwrite(&r,7,1,stdout)!=1||std::fflush(stdout)!=0)return false;
         SDL_Delay(1);
         return std::fwrite(reinterpret_cast<unsigned char*>(&r)+7,sizeof(r)-7,1,stdout)==1&&std::fflush(stdout)==0;
@@ -38,6 +38,7 @@ public:
     SensorFixture(){
         // Steam identity/session variables must not leak into the worker.
         if(SDL_getenv("SteamAppId")||SDL_getenv("SteamVirtualGamepadInfo"))return;
+        if(std::strcmp(sensor_fixture_case(),"fragment-delayed")==0)SDL_Delay(2300);
         start=SDL_GetTicksNS();connect();
     }
     ~SensorFixture(){if(joystick)disconnect();}

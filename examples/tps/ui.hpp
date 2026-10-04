@@ -97,6 +97,12 @@ inline void ui(ImDrawList* draw,Host& host,gl_context* c,ImVec2 view,bool synthe
         rect(draw,{p.x,p.y+24*s},{146*s*float(host.reload_progress()),3*s},color(92,217,192),1);
     }
     if(host.inventory)inventory_ui(draw,host,view,s,confirm&&!host.paused&&!gl_panel_open(c),confirm_button);
+    if(host.scoped()&&!host.inventory){
+        rect(draw,{32*s,174*s},{207*s,66*s},color(13,26,38,231),7*s);
+        text(draw,{47*s,183*s},17*s,color(236,178,92),host.sniper_zoom?"ZOOM 2":"ZOOM 1");
+        const auto hint="V / wheel / "+std::string(confirm_button);
+        text(draw,{47*s,209*s},14*s,color(180,204,214),hint.c_str(),177*s);
+    }
     if(host.paused)rect(draw,{0,0},view,color(4,11,20,180),0);
     rect(draw,{0,view.y-65*s},{view.x,65*s},color(10,20,31,239),0);
     std::string commands=host.inventory?"Gyro / mouse / right stick: cursor   |   Click / "+std::string(confirm_button)+": equip":

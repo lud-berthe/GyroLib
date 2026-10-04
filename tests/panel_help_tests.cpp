@@ -20,7 +20,7 @@ int main(int argc,char** argv){
     const bool capture=argc>1&&std::strcmp(argv[1],"--capture")==0;
     if(!SDL_Init(SDL_INIT_VIDEO))return 1;
     bool ok=true;
-    for(int size=0;size<2;++size)for(const char* language:{"en","fr"}){
+    for(int size=0;size<2;++size)for(const char* language:{"en","fr","de","es","it","pt"}){
         const int width=size?3840:1024,height=size?2160:720;const float scale=size?2.f:1.f;
         auto* window=SDL_CreateWindow("GyroLib help regression",width,height,SDL_WINDOW_HIDDEN);
         auto* renderer=window?SDL_CreateRenderer(window,nullptr):nullptr;if(!renderer)return 2;
@@ -31,7 +31,7 @@ int main(int argc,char** argv){
         endpoint.caps.sticks=endpoint.caps.touchpads=3;std::strcpy(endpoint.name,"Steam Controller (synthetic)");
         endpoint.caps.buttons=0xffffffffu;
         gl_register_endpoint(context.get(),&endpoint);gl_select_device(context.get(),1);
-        gl_set_host_capabilities(context.get(),GL_HOST_NATIVE_STICK_SUPPRESSION|GL_HOST_NATIVE_TOUCHPAD_SUPPRESSION|GL_HOST_SHORT_PRESS_FILTER);
+        gl_set_host_capabilities(context.get(),GL_HOST_NATIVE_STICK_SUPPRESSION|GL_HOST_NATIVE_TOUCHPAD_SUPPRESSION|GL_HOST_LONG_PRESS_BLOCKING);
         auto* panel=gl_panel_create(context.get(),nullptr);
         ImGui::CreateContext();auto& io=ImGui::GetIO();io.IniFilename=nullptr;io.Fonts->AddFontDefaultVector();
         io.ConfigFlags|=ImGuiConfigFlags_NavEnableKeyboard;
@@ -56,6 +56,11 @@ int main(int argc,char** argv){
             gl_host_state host{};host.focused=host.camera_allowed=1;gl_output output{};gl_update(context.get(),now,&host,&output);
             io.AddMousePosEvent(hover.x,hover.y);ImGui_ImplSDLRenderer3_NewFrame();ImGui::NewFrame();
             if(frame==0){
+                const struct {const char* language;const char* key;const char* expected;} catalog[]={
+#include "localization_catalog.inc"
+                };
+                // Check every shipped string, including help not exposed by a setting.
+                for(const auto& text:catalog)if(std::strcmp(text.language,language)==0)check_text(gl_text(context.get(),text.key));
                 for(unsigned n=0;n<gl_setting_count();++n){gl_setting_info setting{};gl_setting_at(context.get(),n,&setting);
                     check_text(setting.label);check_text(setting.description);
                     for(unsigned i=0;i<gl_menu_choice_count(context.get(),setting.id);++i){gl_choice choice{};
@@ -137,16 +142,16 @@ int main(int argc,char** argv){
             if(!ok)std::printf("Flick expander failed in %s %dx%d\n",language,width,height);
             gl_setting_set(context.get(),"context.1.gyro.activation",GL_HOLD);
             gl_setting_set(context.get(),"context.1.activation.button",3);
-            gl_setting_set(context.get(),"context.1.activation.short_press",0);draw();
+            gl_setting_set(context.get(),"context.1.activation.block_long_press",0);draw();
             const auto button_parent=child->GetID("context.1.activation.button");
             const auto button_combo=ImHashStr("##value",0,button_parent);
-            const auto tap_parent=ImHashStr("context.1.activation.short_press",0,button_parent);
-            const auto checkbox=ImHashStr(gl_text(context.get(),"ui.short_press.short"),0,tap_parent);
+            const auto blocker_parent=ImHashStr("context.1.activation.block_long_press",0,button_parent);
+            const auto checkbox=ImHashStr(gl_text(context.get(),"ui.block_long_press"),0,blocker_parent);
             for(int n=0;n<60&&GImGui->NavId!=button_combo&&GImGui->NavId!=checkbox;++n)key(ImGuiKey_UpArrow);
             ok&=GImGui->NavId==button_combo||GImGui->NavId==checkbox;
             if(GImGui->NavId==button_combo)key(ImGuiKey_RightArrow);
             ok&=GImGui->NavId==checkbox;key(ImGuiKey_Space);
-            double tap=0;ok&=gl_setting_get(context.get(),"context.1.activation.short_press",&tap)==GL_OK&&tap==1;
+            double tap=0;ok&=gl_setting_get(context.get(),"context.1.activation.block_long_press",&tap)==GL_OK&&tap==1;
             ImGui::SetScrollY(child,0);draw();draw();
             if(capture){SDL_SetRenderDrawColor(renderer,12,22,32,255);SDL_RenderClear(renderer);
                 ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(),renderer);

@@ -4,6 +4,7 @@ set(GyroLib_Core_FOUND TRUE)
 set(GyroLib_Steam_FOUND TRUE)
 set(GyroLib_SDL_FOUND @GL_BUILD_SDL@)
 set(GyroLib_Panel_FOUND @GL_BUILD_PANEL@)
+set(GyroLib_Overlay_FOUND @GL_BUILD_OVERLAY@)
 # Core consumers do not discover SDL. When this SDK was built with the vendored
 # package, its development files move with the SDK. Explicit SDL3_DIR settings
 # and a host's existing SDL targets keep their usual CMake precedence.

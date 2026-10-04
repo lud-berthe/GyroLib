@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 ReturnalGyro contributors
+Copyright (c) 2026 GyroLib contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,5 +20,4 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-Third-party components retain their respective licenses. This license grants
-no rights to Returnal or its proprietary binaries, names or assets.
+Third-party components retain their respective licenses.

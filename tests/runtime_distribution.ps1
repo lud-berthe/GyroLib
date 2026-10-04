@@ -54,5 +54,5 @@ if((Get-ChildItem -LiteralPath $target -Force).Count){throw 'Runtime wrote throu
 if((Get-ChildItem -LiteralPath $stage -File).Count -ne 3){throw 'Unexpected files beside the game'}
 # Settings are deliberately beside the runtime DLL, independent of this shell's cwd/cache.
 Run-Test 'settings'
-if(!(Test-Path -LiteralPath (Join-Path $stage 'girolib.ini')) -or (Get-ChildItem -LiteralPath $stage -File).Count -ne 4){throw 'Settings file location mismatch'}
-Write-Output 'Distribution passed: three binaries, local girolib.ini, lazy reader, recovery, concurrency, failed-cache isolation.'
+if(!(Test-Path -LiteralPath (Join-Path $stage 'gyrolib.ini')) -or (Get-ChildItem -LiteralPath $stage -File).Count -ne 4){throw 'Settings file location mismatch'}
+Write-Output 'Distribution passed: three binaries, local gyrolib.ini, lazy reader, recovery, concurrency, failed-cache isolation.'

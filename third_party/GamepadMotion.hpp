@@ -261,7 +261,7 @@ public:
 
 	void ResetMotion();
 
-	// Returnal extension: seed orientation tracking once from a fresh accelerometer
+	// GyroLib extension: seed orientation tracking once from a fresh accelerometer
 	// sample after a device reset. Does not calibrate gyro or integrate fictitious time.
 	bool InitializeGravityFromAcceleration(float x, float y, float z);
 

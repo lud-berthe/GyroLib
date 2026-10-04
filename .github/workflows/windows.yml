@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [bundled, core-static]
+        variant: [bundled, full-static, core-static]
     defaults:
       run:
         shell: pwsh
@@ -30,6 +30,7 @@ jobs:
       - name: Build and test
         run: |
           $buildArguments = @{ BuildDirectory = 'build-ci' }
+          if ($env:GYROLIB_VARIANT -eq 'full-static') { $buildArguments.Static = $true }
           if ($env:GYROLIB_VARIANT -eq 'core-static') {
             $buildArguments.Static = $true
             $buildArguments.CoreOnly = $true
@@ -49,9 +50,11 @@ jobs:
           $source = Join-Path $env:RUNNER_TEMP 'gyrolib-consumer-source'
           $build = Join-Path $env:RUNNER_TEMP 'gyrolib-consumer-build'
           Copy-Item -LiteralPath tests/install_consumer -Destination $source -Recurse
-          $extras = if ($env:GYROLIB_VARIANT -eq 'bundled') { 'ON' } else { 'OFF' }
+          Copy-Item -LiteralPath tests/overlay_tests.cpp -Destination (Join-Path $env:RUNNER_TEMP 'overlay_tests.cpp')
+          $extras = if ($env:GYROLIB_VARIANT -ne 'core-static') { 'ON' } else { 'OFF' }
           cmake -S "$source" -B "$build" -A x64 "-DCMAKE_PREFIX_PATH=$sdk" `
             "-DGL_CONSUMER_SDL=$extras" "-DGL_CONSUMER_PANEL=$extras" `
+            "-DGL_CONSUMER_OVERLAY=$extras" `
             -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           cmake --build "$build" --config Release --parallel 4

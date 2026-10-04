@@ -31,7 +31,7 @@ static void build_native_menu(gl_context* gyro) {
          * updates/actions: Cancel replaces Recalibrate during manual calibration.
          * gl_get_diagnostics supplies countdown, progress and movement feedback.
          * After registering all views/defaults, gl_initialize_settings(gyro,NULL,NULL)
-         * loads/creates girolib.ini. Check its result before editing. This console
+         * loads/creates gyrolib.ini. Check its result before editing. This console
          * fixture deliberately uses no file. The retired ui.scale row is hidden.
          * Setting/language edits and reset then auto-save. Display errors
          * from gl_get_settings_save_result; edits remain applied in memory. */
@@ -63,7 +63,7 @@ static void build_native_menu(gl_context* gyro) {
 }
 int main(void) {
     gl_context* gyro=gl_create(GL_ABI_VERSION);double camera[2]={0,0};
-    gl_host_state host={0};gl_output output;gl_event event;
+    gl_host_state host={0};gl_output output;gl_event_ex event;
     if(!gyro)return 1;gl_set_camera_callback(gyro,apply_camera,camera);
     /* At least one view is required. Modes belong to this example host. IDs stay
      * unchanged across versions/languages. Localize labels in your mod. */
@@ -93,6 +93,6 @@ int main(void) {
     }
     /* If output.suppress_native_right_stick, skip YOUR native stick camera path.
      * Do not modify character movement or actions. */
-    while(gl_poll_event(gyro,&event)==1){}
+    while(gl_poll_event_ex(gyro,&event)==1){}
     gl_destroy(gyro);return 0;
 }

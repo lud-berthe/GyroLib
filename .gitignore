@@ -46,7 +46,7 @@
 *.exp
 
 # Runtime settings, captures and local logs; keep fixtures/assets publishable.
-girolib.ini
+gyrolib.ini
 imgui.ini
 /panel*.bmp
 /tps-*.bmp

@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <numbers>
 #include <set>
 #include <stdexcept>
@@ -118,7 +119,7 @@ static void gyro_off(){
     Fixture f;
     f.set("gyro.smoothing_ms",25);f.set("gyro.acceleration",1);f.set("activation.button",3);
     f.set("activation.touchpad",GL_SIDE_RIGHT);f.set("gyro.activation",GL_GYRO_OFF);
-    gl_set_host_capabilities(f.c,GL_HOST_NATIVE_STICK_SUPPRESSION|GL_HOST_SHORT_PRESS_FILTER);
+    gl_set_host_capabilities(f.c,GL_HOST_NATIVE_STICK_SUPPRESSION|GL_HOST_LONG_PRESS_BLOCKING);
     f.set("flick.mode",GL_FLICK_ON);f.set("flick.duration_ms",0);
     gl_set_gyro_override(f.c,1);near(f.tick({0,100,0}).yaw_degrees,0);CHECK(!f.state().enabled);
     CHECK(gl_filter_event(f.c,7,GL_PRESS,f.now,1,0)==GL_FORWARD);
@@ -132,7 +133,7 @@ static void gyro_off(){
         if(gl_setting_is_activator(info.id))CHECK(!info.visible);
     }
     CHECK(!visible.empty()&&visible.front()=="context.1.gyro.activation");
-    const auto path=std::filesystem::temp_directory_path()/"gyrolib-off-migration.ini";
+    const auto path=std::filesystem::temp_directory_path()/"gyrolib-off-persistence.ini";
     CHECK(gl_save_settings(f.c,path.string().c_str())==GL_OK);
     {std::ifstream saved(path);const std::string data((std::istreambuf_iterator<char>(saved)),{});
         CHECK(data.find("gyro.enabled")==std::string::npos&&data.find("gyro.activation=6")!=std::string::npos);}
@@ -145,12 +146,12 @@ static void gyro_off(){
         if(!std::strcmp(info.id,"context.1.gyro.space"))CHECK(info.visible&&n==1);}
     CHECK(gl_save_settings(restored.c,path.string().c_str())==GL_OK);
     CHECK(gl_load_settings(f.c,path.string().c_str())==GL_OK);gl_setting_get(f.c,"context.1.gyro.activation",&mode);near(mode,GL_ALWAYS);
-    {std::ofstream old(path);old<<"schema=15\ncontext.1.gyro.enabled=0\ncontext.1.gyro.activation=3\ncontext.1.sensitivity_x=6\n";}
+    {std::ofstream old(path);old<<"schema=0.2.0\ncontext.1.gyro.activation=6\ncontext.1.sensitivity_x=6\n";}
     CHECK(gl_load_settings(restored.c,path.string().c_str())==GL_OK);gl_setting_get(restored.c,"context.1.gyro.activation",&mode);near(mode,GL_GYRO_OFF);
     restored.set("gyro.activation",GL_HOLD);gl_setting_get(restored.c,"context.1.sensitivity_x",&sensitivity);near(sensitivity,6);
     gl_setting_get(restored.c,"context.1.gyro.enabled",&mode);near(mode,1);
     std::filesystem::remove(path);
-    CHECK(gl_setting_is_activator("context.1.activation.trigger")&&gl_setting_is_activator("activation.short_press"));
+    CHECK(gl_setting_is_activator("context.1.activation.trigger")&&gl_setting_is_activator("activation.block_long_press"));
     CHECK(!gl_setting_is_activator("gyro.activation")&&!gl_setting_is_activator("activation.trackball"));
 }
 static void trackball(){
@@ -202,8 +203,8 @@ static void shared_hold_activators(){
     f.host.paused=0;near(f.tick().yaw_degrees,0);f.controls.touchpads=0;near(f.tick({0,100,0}).yaw_degrees,-1);
     // Existing tap filtering does not delay inversion, and still distinguishes
     // short game actions from holds on the same activation button.
-    Fixture tap;gl_set_host_capabilities(tap.c,GL_HOST_SHORT_PRESS_FILTER);
-    tap.set("gyro.activation",GL_HOLD_DISABLE);tap.set("activation.button",3);tap.set("activation.short_press",1);
+    Fixture tap;gl_set_host_capabilities(tap.c,GL_HOST_LONG_PRESS_BLOCKING);
+    tap.set("gyro.activation",GL_HOLD_DISABLE);tap.set("activation.button",3);tap.set("activation.block_long_press",1);
     tap.set("activation.temporary_invert",1);tap.set("gyro.temporary_invert_axes",0);
     CHECK(gl_filter_event(tap.c,7,GL_PRESS,tap.now+10000000,1,0)==GL_SUPPRESS);
     tap.controls.buttons=4;near(tap.tick({0,100,0}).yaw_degrees,1);
@@ -244,9 +245,9 @@ static void flick_cadence(){
     f.set("flick.touchpad_start_threshold",.05);double release=1;
     gl_setting_get(f.c,"context.1.flick.touchpad_release_threshold",&release);near(release,0);
 }
-static void migration_and_menu(){
+static void persistence_and_menu(){
     Fixture f;const auto path=std::filesystem::temp_directory_path()/"gyrolib-audit-features.ini";
-    {std::ofstream file(path);file<<"schema=12\nui.menu_key=F8\ncontext.1.sensitivity_x=6\ncontext.1.flick.smoothing_threshold_degrees=2\nhost.keep=value\n";}
+    {std::ofstream file(path);file<<"schema=0.2.0\nui.menu_key=F8\ncontext.1.sensitivity_x=6\ncontext.1.flick.smoothing_threshold_dps=60\nhost.keep=value\n";}
     CHECK(gl_load_settings(f.c,path.string().c_str())==GL_OK);double speed=0;gl_setting_get(f.c,"context.1.flick.smoothing_threshold_dps",&speed);near(speed,60);
     f.set("gyro.activation",GL_HOLD_DISABLE);f.set("activation.button",3);
     f.set("activation.temporary_invert",1);f.set("activation.trackball",1);f.set("gyro.trackball_decay",2.5);
@@ -259,25 +260,128 @@ static void migration_and_menu(){
                 for(uint32_t j=0;j<gl_menu_choice_count(f.c,info.id);++j){gl_choice option{};gl_choice_at(f.c,info.id,j,&option);CHECK(*gl_choice_description(f.c,info.id,option.value));}
         }
     }
-    std::ifstream file(path);const std::string text((std::istreambuf_iterator<char>(file)),{});CHECK(text.find("schema=17")!=std::string::npos&&text.find("host.keep=value")!=std::string::npos);
+    std::ifstream file(path);const std::string text((std::istreambuf_iterator<char>(file)),{});CHECK(text.find("schema=0.2.0")!=std::string::npos&&text.find("host.keep=value")!=std::string::npos);
     CHECK(text.find("gyro.temporary_invert_button")==std::string::npos&&text.find("gyro.trackball_button")==std::string::npos);
     file.close();
-    {std::ofstream old(path);old<<"schema=13\ncontext.1.gyro.activation=5\ncontext.1.activation.touchpad=2\ncontext.1.gyro.temporary_invert_button=3\ncontext.1.gyro.trackball_button=4\ncontext.1.gyro.trackball_decay=2.5\n";}
+    {std::ofstream old(path);old<<"schema=0.2.0\ncontext.1.gyro.activation=5\ncontext.1.activation.touchpad=2\ncontext.1.activation.temporary_invert=1\ncontext.1.activation.trackball=1\ncontext.1.gyro.trackball_decay=2.5\n";}
     CHECK(gl_load_settings(restored.c,path.string().c_str())==GL_OK);
     for(const char* key:{"context.1.activation.temporary_invert","context.1.activation.trackball"}){double value=0;CHECK(gl_setting_get(restored.c,key,&value)==GL_OK);near(value,1);}
     double pad=0;gl_setting_get(restored.c,"context.1.activation.touchpad",&pad);near(pad,GL_SIDE_RIGHT);
     restored.controls.touchpads=GL_RIGHT;CHECK(restored.tick().yaw_degrees==0&&restored.state().trackball_active);
     CHECK(gl_save_settings(restored.c,path.string().c_str())==GL_OK);std::filesystem::remove(path);
-    for(int retired:{1,2}){
-        {std::ofstream old(path);old<<"schema=14\ncontext.1.gyro.activation=3\ncontext.1.activation.touchpad=2\ncontext.1.gyro.look_stick_effect="<<retired<<'\n';}
-        Fixture migrated;CHECK(gl_load_settings(migrated.c,path.string().c_str())==GL_OK);migrated.controls.right_x=1;
-        near(migrated.tick({0,100,0}).yaw_degrees,0);migrated.controls.touchpads=GL_RIGHT;near(migrated.tick({0,100,0}).yaw_degrees,-1);
-        double retired_value=9;CHECK(gl_setting_get(migrated.c,"context.1.gyro.look_stick_effect",&retired_value)==GL_OK);near(retired_value,0);
-        CHECK(gl_save_settings(migrated.c,path.string().c_str())==GL_OK);
-        std::ifstream saved(path);const std::string content((std::istreambuf_iterator<char>(saved)),{});CHECK(content.find("gyro.look_stick_effect")==std::string::npos);
-        saved.close();std::filesystem::remove(path);
-    }
+    // Removed development fields are rejected, not silently converted.
+    {std::ofstream invalid(path);invalid<<"schema=0.2.0\ncontext.1.gyro.look_stick_effect=1\n";}
+    CHECK(gl_load_settings(restored.c,path.string().c_str())==GL_INVALID);
+    std::filesystem::remove(path);
 }
-int main(){try{stable_activity_and_local_only();activation_and_triggers();modifiers_and_safety();conditional_menu();gyro_off();trackball();shared_hold_activators();flick_cadence();migration_and_menu();
-    std::cout<<"Gyro audit: activity, gyro-only sources, analog activation, modifiers, trackball, timed flick and migration passed\n";return 0;
+static void all_menu_options(){
+    Fixture f;
+    gl_set_host_capabilities(f.c,GL_HOST_NATIVE_STICK_SUPPRESSION|GL_HOST_NATIVE_TOUCHPAD_SUPPRESSION|
+        GL_HOST_LONG_PRESS_BLOCKING|GL_HOST_MENU_STATE);
+    gl_set_recenter_callback(f.c,[](void*){},nullptr);
+    CHECK(gl_set_gameplay_context_zoom_available(f.c,1,1)==GL_OK);
+    const gl_trigger_input triggers{f.now,GL_LEFT|GL_RIGHT,0,0};
+    const gl_flick_input flick{f.now,GL_FLICK_INPUT_STICK|GL_FLICK_INPUT_TOUCHPAD,0,0,0,0,0};
+    CHECK(gl_submit_trigger_input(f.c,1,&triggers)==GL_OK);
+    CHECK(gl_submit_flick_input(f.c,1,&flick)==GL_OK);
+    f.set("activation.button",3);f.set("activation.trigger",GL_SIDE_BOTH);
+    f.set("activation.stick_deflection",GL_SIDE_BOTH);f.set("activation.temporary_invert",1);
+    f.set("activation.trackball",1);f.set("gyro.smoothing_ms",25);
+    f.set("gyro.acceleration",1);f.set("flick.snap",2);
+    // Union of every supported mode: a current field must be reachable somewhere,
+    // including inline controls and children of the four advanced groups.
+    std::map<std::string,gl_setting_info> exposed;
+    const auto collect=[&](uint64_t tab){
+        for(uint32_t i=0;i<gl_menu_tab_setting_count(f.c,tab);++i){gl_setting_info s{};
+            CHECK(gl_menu_tab_setting_at(f.c,tab,i,&s)==GL_OK);
+            if(s.visible&&s.available&&s.type!=GL_SETTING_ACTION)exposed[s.id]=s;
+        }
+    };
+    for(int activation:{GL_GYRO_OFF,GL_ALWAYS,GL_HOLD_DISABLE,GL_HOLD,GL_TOGGLE})
+        for(int space=0;space<9;++space)
+            for(int mode:{GL_FLICK_OFF,GL_FLICK_ON,GL_FLICK_TOUCHPAD,GL_FLICK_BOTH})
+                for(int style=0;style<3;++style){
+                    f.set("gyro.activation",activation);f.set("gyro.space",space);
+                    f.set("flick.mode",mode);f.set("flick.style",style);collect(2);
+                }
+    collect(GL_TAB_GENERAL);
+    const std::set<std::string> retired={"gyro.enabled","gyro.context","flick.context","ui.scale",
+        "flick.smoothing_threshold_degrees","gyro.temporary_invert_button","gyro.trackball_button","gyro.look_stick_effect"};
+    std::set<std::string> expected;
+    for(uint32_t i=0;i<gl_setting_count();++i){gl_setting_info s{};CHECK(gl_setting_at(f.c,i,&s)==GL_OK);
+        if(s.type==GL_SETTING_ACTION||retired.count(s.id))continue;
+        const std::string suffix=!std::strcmp(s.id,"gyro.sensitivity_x")?"sensitivity_x":
+            !std::strcmp(s.id,"gyro.sensitivity_y")?"sensitivity_y":s.id;
+        expected.insert(suffix=="calibration.automatic"?suffix:"context.1."+suffix);
+    }
+    for(const auto& id:expected)if(!exposed.count(id))throw std::runtime_error("Unreachable menu option: "+id);
+    CHECK(exposed.size()==expected.size());
+    // All languages must supply both a label and help for each reachable option
+    // and each selectable choice. Derived/retired choices stay nonselectable.
+    for(const char* language:{"en","fr","de","es","it","pt"}){
+        CHECK(gl_set_language(f.c,language)==GL_OK);
+        for(uint64_t tab:{uint64_t(GL_TAB_GENERAL),uint64_t(2)})
+            for(uint32_t i=0;i<gl_menu_tab_setting_count(f.c,tab);++i){gl_setting_info s{};
+                CHECK(gl_menu_tab_setting_at(f.c,tab,i,&s)==GL_OK);if(!exposed.count(s.id))continue;
+                CHECK(s.label&&*s.label&&std::strcmp(s.label,"?")&&s.description&&*s.description&&std::strcmp(s.description,"?"));
+                for(uint32_t j=0;j<gl_menu_choice_count(f.c,s.id);++j){gl_choice choice{};
+                    CHECK(gl_choice_at(f.c,s.id,j,&choice)==GL_OK);if(!choice.available)continue;
+                    CHECK(choice.label&&*choice.label&&std::strcmp(choice.label,"?"));
+                    CHECK(*gl_choice_description(f.c,s.id,choice.value));
+                }
+            }
+    }
+    CHECK(gl_set_language(f.c,"en")==GL_OK);
+    const gl_gameplay_context other{2,"Other camera","",0};CHECK(gl_register_gameplay_context(f.c,&other)==GL_OK);
+    std::map<std::string,double> untouched;
+    for(uint32_t i=0;i<gl_menu_tab_setting_count(f.c,3);++i){gl_setting_info s{};
+        CHECK(gl_menu_tab_setting_at(f.c,3,i,&s)==GL_OK);double v{};
+        CHECK(gl_setting_get(f.c,s.id,&v)==GL_OK);untouched[s.id]=v;
+    }
+    const auto path=std::filesystem::current_path()/"all-menu-options.ini";
+    CHECK(gl_set_settings_path(f.c,path.string().c_str())==GL_OK);
+    CHECK(gl_save_settings(f.c,path.string().c_str())==GL_OK);
+    size_t edits=0;
+    for(const auto& [id,s]:exposed){
+        std::set<double> values;
+        if(s.type==GL_SETTING_ENUM){
+            for(uint32_t j=0;j<gl_menu_choice_count(f.c,id.c_str());++j){gl_choice choice{};
+                CHECK(gl_choice_at(f.c,id.c_str(),j,&choice)==GL_OK);
+                if(choice.available)CHECK(values.insert(choice.value).second);
+            }
+        }else{values.insert(s.minimum);values.insert(s.maximum);
+            values.insert(s.minimum+std::floor((s.maximum-s.minimum)/s.step/2)*s.step);}
+        CHECK(!values.empty());
+        for(double value:values){
+            CHECK(gl_setting_set(f.c,id.c_str(),value)==GL_OK);double applied{};
+            CHECK(gl_setting_get(f.c,id.c_str(),&applied)==GL_OK);near(applied,value);
+            Fixture restored;CHECK(gl_register_gameplay_context(restored.c,&other)==GL_OK);
+            CHECK(gl_load_settings(restored.c,path.string().c_str())==GL_OK);
+            // Verify the complete saved state after each edit, including coupled
+            // acceleration/threshold changes, and isolation of the other view.
+            for(const auto& [key,meta]:exposed){double before{},after{};
+                CHECK(gl_setting_get(f.c,key.c_str(),&before)==GL_OK);
+                CHECK(gl_setting_get(restored.c,key.c_str(),&after)==GL_OK);near(after,before);
+            }
+            for(const auto& [key,before]:untouched){double after{};
+                CHECK(gl_setting_get(restored.c,key.c_str(),&after)==GL_OK);near(after,before);
+            }
+            ++edits;
+        }
+    }
+    CHECK(gl_action(f.c,"calibration.begin")==GL_OK);
+    bool cancel=false;
+    for(uint32_t i=0;i<gl_menu_shared_setting_count(f.c);++i){gl_setting_info s{};
+        CHECK(gl_menu_shared_setting_at(f.c,i,&s)==GL_OK);
+        if(!std::strcmp(s.id,"calibration.cancel"))cancel=s.visible&&s.available;
+    }CHECK(cancel);CHECK(gl_action(f.c,"calibration.cancel")==GL_OK);
+    CHECK(gl_action(f.c,"settings.reset")==GL_OK);
+    Fixture reset;CHECK(gl_load_settings(reset.c,path.string().c_str())==GL_OK);
+    for(const auto& [id,s]:exposed){double value{};CHECK(gl_setting_get(reset.c,id.c_str(),&value)==GL_OK);near(value,s.default_value);}
+    CHECK(gl_set_settings_path(f.c,"")==GL_OK);std::filesystem::remove(path);
+    std::cout<<"Menu audit: "<<exposed.size()<<" current settings reachable, "<<edits
+        <<" edits round-tripped with view isolation, six languages and shared actions checked\n";
+}
+int main(){try{stable_activity_and_local_only();activation_and_triggers();modifiers_and_safety();conditional_menu();gyro_off();trackball();shared_hold_activators();flick_cadence();persistence_and_menu();all_menu_options();
+    std::cout<<"Gyro audit: activity, gyro-only sources, analog activation, modifiers, trackball, timed flick and persistence passed\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

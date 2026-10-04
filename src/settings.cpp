@@ -27,31 +27,9 @@ static void apply_acceleration_preset(Settings& values){
     values[FastSensY]=values[SensY]*gain[int(values[Acceleration])];
     values[SlowSpeed]=5;values[FastSpeed]=75;
 }
-void migrate_activation(Settings& values){
-    if(values[Activation]==double(GL_ALWAYS)){
-        if(values[ShortPress])values[Activation]=GL_HOLD_DISABLE;
-        for(int i=Button;i<=Stick;++i)if(values[i]!=0){values[Activation]=GL_HOLD_DISABLE;break;}
-    }
-}
 bool profile_setting(int field){return field>=0&&field<SettingCount&&field!=AutoCal&&field!=UIScale&&field!=GyroContext&&field!=FlickContext;}
 std::string profile_key(uint32_t id,int field){
     return "context."+std::to_string(id)+"."+(field==SensX?"sensitivity_x":field==SensY?"sensitivity_y":definitions[field].id);
-}
-Settings migrate_profile(const Settings& source,uint32_t id){
-    auto v=source;
-    // Before schema 6, named modes already had absolute axes with 2.5 defaults.
-    if(id){v[SensX]=v[SensY]=2.5;}
-    const int activation=static_cast<int>(v[Activation]),flick=static_cast<int>(v[FlickMode]);
-    if(activation==GL_CONTEXT_ONLY||activation==GL_OUTSIDE_CONTEXT){
-        const auto selected=static_cast<uint32_t>(v[GyroContext]);
-        const bool allowed=selected&&(activation==GL_CONTEXT_ONLY?selected==id:selected!=id);
-        v[Enabled]=v[Enabled]&&allowed;v[Activation]=GL_ALWAYS;
-    }
-    if(flick==GL_FLICK_CONTEXT_ONLY||flick==GL_FLICK_OUTSIDE_CONTEXT){
-        const auto selected=static_cast<uint32_t>(v[FlickContext]);
-        v[FlickMode]=selected&&(flick==GL_FLICK_CONTEXT_ONLY?selected==id:selected!=id)?GL_FLICK_ON:GL_FLICK_OFF;
-    }
-    migrate_activation(v);v[GyroContext]=v[FlickContext]=0;return v;
 }
 int setting_index(const char* id) {
     if(!id)return -1;for(int i=0;i<SettingCount;++i)if(std::strcmp(id,definitions[i].id)==0)return i;return -1;
@@ -77,15 +55,15 @@ struct SettingsBatch {
     ~SettingsBatch(){--context->settings_batch_depth;}
 };
 int save_change(gl_context* c){
-    return c->settings_batch_depth||c->settings_path.empty()?GL_OK:gl_save_settings(c,c->settings_path.c_str());
+    return c->save_change();
 }
 bool known_language(const char* language){
     if(!language)return false;
     for(const char* known:{"en","fr","de","es","it","pt"})if(std::strcmp(language,known)==0)return true;
     return false;
 }
-const char* action_ids[]={"calibration.begin","calibration.cancel","settings.reset","settings.save"};
-const char* action_keys[]={"calibration.action","cancel","reset","save"};
+const char* action_ids[]={"calibration.begin","calibration.cancel","settings.reset","settings.save","settings.recommended"};
+const char* action_keys[]={"calibration.action","cancel","reset","save","recommended"};
 uint32_t family_cap(const gl_capabilities& c,int index) {
     switch(index){case Touchpad:return c.touchpads;case StickTouch:return c.stick_touch;
         case GripTouch:return c.grip_touch;case Stick:return c.sticks;default:return 0;}
@@ -102,6 +80,29 @@ bool parse_number(const std::string& s,double& value) {
     std::istringstream in(s);in.imbue(std::locale::classic());in>>value;
     if(in.fail()||!std::isfinite(value))return false;in>>std::ws;return in.eof();
 }
+// Semantic format identifiers are compared component-wise, never as decimals.
+bool parse_schema(std::string_view text,std::array<uint32_t,3>& version){
+    for(size_t i=0;i<version.size();++i){
+        const auto dot=text.find('.');
+        if((i<2)==(dot==std::string_view::npos))return false;
+        const auto part=text.substr(0,dot);
+        if(part.empty()||(part.size()>1&&part.front()=='0'))return false;
+        const auto parsed=std::from_chars(part.data(),part.data()+part.size(),version[i]);
+        if(parsed.ec!=std::errc{}||parsed.ptr!=part.data()+part.size())return false;
+        if(i<2)text.remove_prefix(dot+1);
+    }
+    return true;
+}
+int schema_status(std::string_view text){
+    std::array<uint32_t,3> version{},current{};
+    if(!parse_schema(text,version)||!parse_schema(GL_SETTINGS_SCHEMA,current))return GL_INVALID;
+    if(version>current)return GL_NEWER_SCHEMA;
+    return version==current?GL_OK:GL_INVALID;
+}
+bool persisted_profile_setting(int field){
+    return profile_setting(field)&&field!=Enabled&&field!=FlickSmoothAngle&&
+        field!=TemporaryInvertButton&&field!=TrackballButton&&field!=StickEffect;
+}
 bool context_setting(const char* key,uint32_t& id,int& field) {
     if(!key)return false;std::string_view text(key),prefix="context.";
     if(!text.starts_with(prefix))return false;text.remove_prefix(prefix.size());
@@ -111,14 +112,14 @@ bool context_setting(const char* key,uint32_t& id,int& field) {
     auto result=std::from_chars(number.data(),number.data()+number.size(),id);
     if(result.ec!=std::errc{}||result.ptr!=number.data()+number.size()||!id)return false;
     if(suffix==".sensitivity_x")field=SensX;else if(suffix==".sensitivity_y")field=SensY;
-    else {std::string base(suffix.substr(1));field=setting_index(base.c_str());}
+    else {field=-1;for(int i=0;i<SettingCount;++i)if(suffix.substr(1)==definitions[i].id){field=i;break;}}
     return profile_setting(field);
 }
 bool context_selector(int index){return index==GyroContext||index==FlickContext;}
 uint32_t profile_count(){uint32_t count=0;for(int i=0;i<SettingCount;++i)count+=profile_setting(i);return count;}
 int profile_field(uint32_t index){
     constexpr int first[]={Activation,Space,LocalAngle,LocalContribution,SensX,SensY,InvertX,InvertRoll,InvertY,
-        Button,Trigger,TriggerThreshold,Touchpad,StickTouch,GripTouch,Stick,Threshold,ShortPress};
+        Button,Trigger,TriggerThreshold,Touchpad,StickTouch,GripTouch,Stick,Threshold,BlockLongPress};
     for(int field:first)if(index--==0)return field;
     for(int i=0;i<SettingCount;++i)if(profile_setting(i)&&std::find(std::begin(first),std::end(first),i)==std::end(first)){
     // Place the replacement checkboxes before their axis/decay controls without
@@ -133,25 +134,6 @@ bool valid_profile_value(int field,double value){
            (field!=FlickMode||(value==double(GL_FLICK_OFF)||value==double(GL_FLICK_ON)||value==double(GL_FLICK_TOUCHPAD)||value==double(GL_FLICK_BOTH)));
 }
 }
-void gl_context::migrate_contact_bindings(){
-    bool changed=false;
-    const auto migrate=[&](Settings& values,uint32_t profile){
-        const auto button=static_cast<uint32_t>(values[Button]);if(!button||button>32)return;
-        const auto alias=button_contact(button-1);if(!alias.family)return;
-        const int field=alias.family==GL_CONTACT_TOUCHPAD?Touchpad:alias.family==GL_CONTACT_STICK?StickTouch:GripTouch;
-        const int side=alias.side==GL_LEFT?GL_SIDE_LEFT:alias.side==GL_RIGHT?GL_SIDE_RIGHT:GL_SIDE_EITHER;
-        const int previous=static_cast<int>(values[field]);
-        // Families are ORed: preserve the exact predicate when a saved button
-        // alias and a dedicated family were both enabled.
-        const int combined=previous==GL_SIDE_OFF||previous==GL_SIDE_BOTH||previous==side?side:GL_SIDE_EITHER;
-        values[Button]=0;values[field]=combined;changed=true;
-        const auto button_key=profile?profile_key(profile,Button):std::string(definitions[Button].id);
-        const auto family_key=profile?profile_key(profile,field):std::string(definitions[field].id);
-        emit(GL_EVENT_SETTING,Button,0,0,button_key.c_str());emit(GL_EVENT_SETTING,field,0,combined,family_key.c_str());
-    };
-    for(auto& [id,values]:context_settings)migrate(values,id);
-    if(changed){controls_primed=false;for(auto& gate:gates)gate.cancel();save_change(this);}
-}
 extern "C" {
 uint32_t GL_CALL gl_setting_advanced_group(const char* id){
     const int field=resolved_field(id);
@@ -164,12 +146,12 @@ uint32_t GL_CALL gl_setting_advanced_group(const char* id){
 uint32_t GL_CALL gl_setting_is_advanced(const char* id){return gl_setting_advanced_group(id)!=GL_ADVANCED_NONE;}
 uint32_t GL_CALL gl_setting_is_activator(const char* id){
     const int field=resolved_field(id);
-    return (field>=Button&&field<=ShortPress)||field==Trigger||field==TriggerThreshold;
+    return (field>=Button&&field<=BlockLongPress)||field==Trigger||field==TriggerThreshold;
 }
-uint32_t GL_CALL gl_menu_shared_setting_count(const gl_context* c){return c?6:0;}
+uint32_t GL_CALL gl_menu_shared_setting_count(const gl_context* c){return c?7:0;}
 int32_t GL_CALL gl_menu_shared_setting_at(const gl_context* c,uint32_t index,gl_setting_info* out){
     if(!c||!out||index>=gl_menu_shared_setting_count(c))return GL_INVALID;
-    const uint32_t fields[]={AutoCal,UIScale,SettingCount,SettingCount+1,SettingCount+2,SettingCount+3};
+    const uint32_t fields[]={AutoCal,UIScale,SettingCount,SettingCount+1,SettingCount+2,SettingCount+3,SettingCount+4};
     return gl_setting_at(c,fields[index],out);
 }
 uint32_t GL_CALL gl_menu_tab_count(const gl_context* c){return gl_gameplay_context_count(c);}
@@ -193,21 +175,26 @@ int32_t GL_CALL gl_menu_tab_setting_at(const gl_context* c,uint64_t tab,uint32_t
     auto flat=gl_setting_count()+static_cast<uint32_t>(std::distance(c->gameplay_contexts.begin(),it))*profile_count()+index;
     const auto result=gl_setting_at(c,flat,out);
     if(result==GL_OK){
-        const bool custom=c->context_settings.at(it->first)[Acceleration]!=0;
-        const bool combined=c->context_settings.at(it->first)[Space]==double(GL_SPACE_LOCAL_YAW_ROLL);
+        const auto effective=c->effective_settings(it->first);
+        const bool custom=effective[Acceleration]!=0;
+        const bool combined=effective[Space]==double(GL_SPACE_LOCAL_YAW_ROLL);
         out->label=gl_text(c,field==InvertX&&combined?"InvertYaw":custom&&field==SensX?"SlowSensitivityX":
             custom&&field==SensY?"SlowSensitivityY":definitions[field].key);
     }
     return result;
 }
-uint32_t GL_CALL gl_setting_count(void) {return SettingCount+4;}
+uint32_t GL_CALL gl_setting_count(void) {return SettingCount+5;}
 uint32_t GL_CALL gl_menu_setting_count(const gl_context* c) {return c?gl_setting_count()+profile_count()*gl_gameplay_context_count(c):0;}
 int32_t GL_CALL gl_setting_at(const gl_context* c,uint32_t index,gl_setting_info* out) {
     if(!c||!out||index>=gl_menu_setting_count(c))return GL_INVALID;
     *out={};out->visible=out->available=1;
+    const bool connected=std::any_of(c->endpoints.begin(),c->endpoints.end(),[&](const auto& e){
+        return e.info.connected&&!e.motion_companion&&e.info.physical_id==c->selected;
+    });
     if(index>=SettingCount&&index<gl_setting_count()) {
         auto i=index-SettingCount;out->id=action_ids[i];out->label=gl_text(c,action_keys[i]);out->type=GL_SETTING_ACTION;
-        out->description=gl_text(c,i==0?"description.calibration":i==1?"description.calibration.cancel":i==2?"description.reset":"description.save");out->unit="";
+        out->description=gl_text(c,i==0?"description.calibration":i==1?"description.calibration.cancel":i==2?"description.reset":i==4?"description.recommended":"description.save");out->unit="";
+        if(i==4)out->visible=out->available=gl_has_recommended_settings(c);
         if(i<2){
             auto* e=c->endpoint(c->active);out->available=e&&e->info.source==GL_SOURCE_SDL&&
                 (i==1||(e->last_accel&&c->now>=e->last_accel&&c->now-e->last_accel<150000000));
@@ -217,13 +204,14 @@ int32_t GL_CALL gl_setting_at(const gl_context* c,uint32_t index,gl_setting_info
             out->available=out->available&&out->visible;
         }
         if(i==3)out->visible=out->available=0; // legacy explicit save API; frontends auto-save edits
+        out->available=out->available&&connected;
         return GL_OK;
     }
-    const Settings* values=&c->settings;const GameplayContext* context=nullptr;
+    Settings effective{};const Settings* values=&c->settings;const GameplayContext* context=nullptr;uint32_t context_id=0;
     if(index>=gl_setting_count()){
         const auto offset=index-gl_setting_count();
         const auto& [id,state]=*std::next(c->gameplay_contexts.begin(),offset/profile_count());
-        index=profile_field(offset%profile_count());context=&state;values=&c->context_settings.at(id);
+        index=profile_field(offset%profile_count());context=&state;context_id=id;effective=c->device_settings(id);values=&effective;
     }
     const auto& v=*values;
     const auto& d=definitions[index];out->id=d.id;out->label=gl_text(c,d.key);
@@ -248,8 +236,7 @@ int32_t GL_CALL gl_setting_at(const gl_context* c,uint32_t index,gl_setting_info
     bool stick_hook=(c->host_capabilities&GL_HOST_NATIVE_STICK_SUPPRESSION)!=0;
     bool pad_hook=(c->host_capabilities&GL_HOST_NATIVE_TOUCHPAD_SUPPRESSION)!=0;
     if(index==FlickMode||index==FlickMs||index==FlickContext||(index>=FlickStyle&&index<=FlickExponent)||(index>=FlickSmoothSpeed&&index<=FlickPadOuter)) {
-        const bool cursor=context?context->output_target==GL_OUTPUT_CURSOR:
-            (c->gameplay_contexts.empty()&&c->output_target==GL_OUTPUT_CURSOR);
+        const bool cursor=c->effective_output_target(context_id)==GL_OUTPUT_CURSOR;
         out->visible=(stick_hook||pad_hook)&&!cursor;out->available=out->visible&&
             ((stick_hook&&(flick_inputs.available&GL_FLICK_INPUT_STICK))||(pad_hook&&(flick_inputs.available&GL_FLICK_INPUT_TOUCHPAD)));
     }
@@ -273,25 +260,27 @@ int32_t GL_CALL gl_setting_at(const gl_context* c,uint32_t index,gl_setting_info
     if((group==GL_ADVANCED_SMOOTHING&&!v[Smoothing])||
        (group==GL_ADVANCED_ACCELERATION&&!v[Acceleration])||
        (group==GL_ADVANCED_FLICK&&flick_mode==GL_FLICK_OFF))out->visible=out->available=0;
-    const bool camera_view=context?context->output_target!=GL_OUTPUT_CURSOR:c->effective_output_target()!=GL_OUTPUT_CURSOR;
+    const bool camera_view=c->effective_output_target(context_id)!=GL_OUTPUT_CURSOR;
     if(index==RecenterButton)out->visible=out->available=camera_view&&c->recenter;
     if(index==ZoomCompensation)out->visible=out->available=camera_view&&context&&context->zoom_available;
-    if(index==ShortPress){
+    if(index==BlockLongPress){
         const bool hold=v[Activation]==double(GL_HOLD)||v[Activation]==double(GL_HOLD_DISABLE);
         const auto button=static_cast<unsigned>(v[Button]);
-        out->visible=camera_view&&hold&&caps.buttons&&(c->host_capabilities&GL_HOST_SHORT_PRESS_FILTER);
+        out->visible=camera_view&&hold&&caps.buttons&&(c->host_capabilities&GL_HOST_LONG_PRESS_BLOCKING);
         out->available=out->visible&&button>=1&&button<=32&&(caps.buttons&(1u<<(button-1)));
     }
     if(index==UIScale)out->visible=out->available=0; // legacy saved value; panels always use automatic DPI/resolution scaling
     if(index==Enabled)out->visible=out->available=0; // compatibility alias; Activation owns Off
-    if(index>=Button&&index<=ShortPress&&v[Activation]==double(GL_ALWAYS))out->visible=out->available=0;
+    if(index>=Button&&index<=BlockLongPress&&v[Activation]==double(GL_ALWAYS))out->visible=out->available=0;
     if(int(v[Activation])==GL_GYRO_OFF&&(gl_setting_is_activator(d.id)||
         (std::strncmp(d.id,"gyro.",5)==0&&index!=Activation)||index==HoldInvert||index==HoldTrackball))
         out->visible=out->available=0;
     if(context_selector(index))out->visible=out->available=0; // legacy API only; tabs own their settings
     if(context){
         out->id=context->setting_ids[index].c_str();out->label=context->setting_labels[index].c_str();
-        out->description=context->setting_descriptions[index].c_str();out->available=out->available&&context->available;
+        out->description=context->setting_descriptions[index].c_str();
+        // Registration owns the editable profile. Runtime observations only
+        // decide whether it can drive output, not whether it can be configured.
     }
     else if(profile_setting(index))out->visible=out->available=0;
     if(index==InvertX&&space==GL_SPACE_LOCAL_YAW_ROLL){
@@ -301,6 +290,14 @@ int32_t GL_CALL gl_setting_at(const gl_context* c,uint32_t index,gl_setting_info
         out->label=gl_text(c,index==SensX?"SlowSensitivityX":"SlowSensitivityY");
         out->description=gl_text(c,index==SensX?"description.SlowSensitivityX":"description.SlowSensitivityY");
     }
+    out->available=out->available&&connected;
+    if(index==Activation){
+        // Capability belongs to the selected physical group, including its
+        // associated SDL/Steam sensor. A temporary sample gap is not a missing gyro.
+        out->available=out->available&&std::any_of(c->endpoints.begin(),c->endpoints.end(),[&](const auto& e){
+            return e.info.connected&&e.info.physical_id==c->selected&&e.info.caps.gyro;
+        });
+    }
     return GL_OK;
 }
 int32_t GL_CALL gl_setting_get(const gl_context* c,const char* id,double* value) {
@@ -308,8 +305,14 @@ int32_t GL_CALL gl_setting_get(const gl_context* c,const char* id,double* value)
     if(index>=0){if(index!=AutoCal)return GL_UNAVAILABLE;*value=c->settings[index];return GL_OK;}
     uint32_t context_id;int field;
     if(!context_setting(id,context_id,field)||!c->gameplay_contexts.count(context_id))return GL_INVALID;
-    const auto& saved=c->context_settings.at(context_id);
+    const auto saved=c->effective_settings(context_id);
     *value=field==Enabled?saved[Activation]!=double(GL_GYRO_OFF):saved[field];return GL_OK;
+}
+int32_t GL_CALL gl_setting_get_effective(const gl_context* c,const char* id,double* value) {
+    const auto status=gl_setting_get(c,id,value);if(status!=GL_OK)return status;
+    uint32_t context_id;int field;
+    if(context_setting(id,context_id,field))*value=c->device_settings(context_id)[field];
+    return GL_OK;
 }
 int32_t GL_CALL gl_setting_set(gl_context* c,const char* id,double value) try {
     int index=setting_index(id);if(!c||!std::isfinite(value))return GL_INVALID;
@@ -320,27 +323,47 @@ int32_t GL_CALL gl_setting_set(gl_context* c,const char* id,double value) try {
         const auto& d=definitions[field];
         if(value<d.min||value>d.max||!valid_profile_value(field,value))return GL_INVALID;
         value=quantize(field,value);auto& saved=c->context_settings.at(context_id);
-        auto pending=saved;
+        const auto before=c->profile_snapshot();const auto current=c->effective_settings(context_id);
+        auto pending=current;
         if(field==Enabled){
             if(!value)pending[Activation]=GL_GYRO_OFF;
             else if(int(pending[Activation])==GL_GYRO_OFF)pending[Activation]=GL_ALWAYS;
         }else pending[field]=value;
         pending[Enabled]=int(pending[Activation])!=GL_GYRO_OFF;
+        // An explicitly edited contact replaces the legacy button alias shown
+        // in that family. Device changes alone never alter saved preferences.
+        if(field==Touchpad||field==StickTouch||field==GripTouch){
+            const auto binding=static_cast<uint32_t>(current[Button]);
+            const uint32_t family=field==Touchpad?GL_CONTACT_TOUCHPAD:field==StickTouch?GL_CONTACT_STICK:GL_CONTACT_GRIP;
+            if(binding&&binding<=32&&c->button_contact(binding-1).family==family)pending[Button]=0;
+        }
         if(field==FlickSmoothAngle)pending[FlickSmoothSpeed]=value*30;
         if(field==FlickStickInner&&value>=pending[FlickStickOuter])pending[FlickStickOuter]=std::min(1.0,value+.05);
         if(field==FlickStickOuter&&value<=pending[FlickStickInner])pending[FlickStickInner]=std::max(0.0,value-.05);
         if(field==FlickPadInner&&value>=pending[FlickPadOuter])pending[FlickPadOuter]=std::min(1.0,value+.05);
         if(field==FlickPadOuter&&value<=pending[FlickPadInner])pending[FlickPadInner]=std::max(0.0,value-.05);
         if(field==Acceleration||(field==SensX||field==SensY))apply_acceleration_preset(pending);
-        if(field>=FastSensX&&field<=FastSpeed&&saved[field]!=value)pending[Acceleration]=4;
-        bool changed=false;const auto& ids=c->gameplay_contexts.at(context_id).setting_ids;
-        for(int f=0;f<SettingCount;++f)if(saved[f]!=pending[f]){
-            saved[f]=pending[f];c->emit(GL_EVENT_SETTING,f,0,pending[f],ids[f].c_str());changed=true;
+        if(field>=FastSensX&&field<=FastSpeed&&current[field]!=value)pending[Acceleration]=4;
+        const bool custom_transition=pending[Acceleration]==4&&current[Acceleration]!=4;
+        bool changed=false;auto link=c->profile_links.find(context_id);
+        const auto inherited=custom_transition&&link!=c->profile_links.end()?c->effective_settings(link->second.parent):current;
+        const int explicit_field=field==Enabled?Activation:field;
+        for(int f=0;f<SettingCount;++f){
+            // Derive inherited preset components without creating hidden overrides;
+            // components of an explicitly selected local preset must still update.
+            if(link!=c->profile_links.end()&&(field==SensX||field==SensY)&&
+                f>=FastSensX&&f<=FastSpeed&&!link->second.overrides[f])continue;
+            // Pin derived components that would change on entering Custom. Values
+            // already equal to the parent's remain inherited, not hidden overrides.
+            const bool preset_group=(field==Acceleration||(custom_transition&&current[f]!=inherited[f]))&&
+                (f>=FastSensX&&f<=FastSpeed);
+            if(f!=explicit_field&&!preset_group&&pending[f]==current[f])continue;
+            if(link!=c->profile_links.end()&&!link->second.overrides[f]){link->second.overrides.set(f);changed=true;}
+            changed|=saved[f]!=pending[f];saved[f]=pending[f];
         }
         if(!changed)return GL_OK;
-        if(field==RecenterButton)c->recenter_primed=false;
-        if(context_id==c->winning_context()&&(field==Enabled||field==Activation||(field>=Button&&field<=ShortPress)||field==Trigger||field==TriggerThreshold||field==StickEffect)){
-            for(auto& gate:c->gates)gate.cancel();c->controls_primed=false;c->stick_gate.reset();c->trigger_gate.reset();}
+        c->profiles_changed(before);
+        if(link!=c->profile_links.end())c->emit(GL_EVENT_CONTEXT,6,0,context_id);
         return save_change(c);
     }
     const auto& d=definitions[index];if(value<d.min||value>d.max)return GL_INVALID;
@@ -348,7 +371,7 @@ int32_t GL_CALL gl_setting_set(gl_context* c,const char* id,double value) try {
     if(context_selector(index)&&value!=std::floor(value))return GL_INVALID;
     value=quantize(index,value);if(c->settings[index]==value)return GL_OK;
     c->settings[index]=value;c->emit(GL_EVENT_SETTING,index,0,value,id);
-    if(index==Activation||(index>=Button&&index<=ShortPress)){for(auto& g:c->gates)g.cancel();c->controls_primed=false;}
+    if(index==Activation||(index>=Button&&index<=BlockLongPress)){for(auto& g:c->long_press_blockers)g.cancel();c->controls_primed=false;}
     return save_change(c);
 } catch (...) {return GL_LIMIT;}
 uint32_t GL_CALL gl_choice_count(const char* id) {
@@ -392,12 +415,11 @@ int32_t GL_CALL gl_choice_at(const gl_context* c,const char* id,uint32_t index,g
         if(index==GL_CAL_MENUS)out->available=(c->host_capabilities&GL_HOST_MENU_STATE)!=0;}
     if(field==FlickMode){const char* keys[]={"off","mode.outside_context","on","mode.context","flick.touchpad","flick.both"};key=keys[index];
         const auto inputs=c->flick_inputs();const bool pad=(inputs.available&GL_FLICK_INPUT_TOUCHPAD)!=0;
-        if(index==GL_FLICK_ON&&pad)key="flick.stick";
+        if(index==GL_FLICK_ON)key="flick.stick";
         if(index==GL_FLICK_CONTEXT_ONLY||index==GL_FLICK_OUTSIDE_CONTEXT)out->available=0;
         if(index){
             uint32_t mode_id;int mode_field;
-            const bool cursor=context_setting(id,mode_id,mode_field)?c->gameplay_contexts.at(mode_id).output_target==GL_OUTPUT_CURSOR:
-                (c->gameplay_contexts.empty()&&c->output_target==GL_OUTPUT_CURSOR);
+            const bool cursor=c->effective_output_target(context_setting(id,mode_id,mode_field)?mode_id:0)==GL_OUTPUT_CURSOR;
             const bool stick=(inputs.available&GL_FLICK_INPUT_STICK)&&(c->host_capabilities&GL_HOST_NATIVE_STICK_SUPPRESSION);
             const bool touchpad=pad&&(c->host_capabilities&GL_HOST_NATIVE_TOUCHPAD_SUPPRESSION);
             out->available=out->available&&!cursor&&
@@ -407,6 +429,11 @@ int32_t GL_CALL gl_choice_at(const gl_context* c,const char* id,uint32_t index,g
         const char* keys[]={"off","left","right","either","both"};key=keys[index];
         const auto available=field==Trigger?c->trigger_inputs().available:family_cap(caps,field);out->available=side_available(available,index);
         if(field==Trigger&&(index==GL_SIDE_LEFT||index==GL_SIDE_RIGHT)){out->label=gl_get_trigger_label(c,index==GL_SIDE_LEFT?GL_LEFT:GL_RIGHT);return GL_OK;}
+        if(field==Trigger&&(index==GL_SIDE_EITHER||index==GL_SIDE_BOTH)){
+            auto& label=c->trigger_pair_labels[index-GL_SIDE_EITHER];
+            const auto composed=std::string(gl_get_trigger_label(c,GL_LEFT))+gl_text(c,index==GL_SIDE_EITHER?"button.or":"button.and")+gl_get_trigger_label(c,GL_RIGHT);
+            if(label!=composed)label=composed;out->label=label.c_str();return GL_OK;
+        }
         // A single surface has no left/right distinction. Keep its persisted
         // EITHER value while presenting the meaningful Off/On pair.
         if(field==Touchpad&&available==GL_SINGLE&&index==GL_SIDE_EITHER)key="on";
@@ -452,21 +479,23 @@ int32_t GL_CALL gl_action(gl_context* c,const char* id) {
     if(!c||!id)return GL_INVALID;
     if(std::strcmp(id,"calibration.begin")==0)return gl_begin_calibration(c);
     if(std::strcmp(id,"calibration.cancel")==0){gl_cancel_calibration(c);return GL_OK;}
-    if(std::strcmp(id,"settings.reset")==0){gl_reset_settings(c);return c->settings_path.empty()?GL_OK:c->settings_save_result;}
+    if(std::strcmp(id,"settings.reset")==0){gl_reset_settings(c);return c->settings_save_result;}
+    if(std::strcmp(id,"settings.recommended")==0)return gl_apply_recommended_settings(c);
     if(std::strcmp(id,"settings.save")==0)return c->settings_path.empty()?GL_UNAVAILABLE:gl_save_settings(c,c->settings_path.c_str());
     return GL_INVALID;
 }
-void GL_CALL gl_reset_settings(gl_context* c) {
+void GL_CALL gl_reset_settings(gl_context* c) try {
     if(!c)return;
+    const auto before=c->profile_snapshot();
     {
     SettingsBatch batch(c);
     gl_setting_set(c,definitions[AutoCal].id,definitions[AutoCal].def);
-    for(const auto& [id,state]:c->gameplay_contexts)for(int field=0;field<SettingCount;++field)
-        if(profile_setting(field))gl_setting_set(c,state.setting_ids[field].c_str(),definitions[field].def);
+    c->profile_links.clear();
     for(auto& [id,profile]:c->context_settings)profile=defaults(); // including retired modes
+    c->profiles_changed(before);c->emit(GL_EVENT_CONTEXT,6);
     }
-    save_change(c);
-}
+    c->settings_save_result=save_change(c);
+} catch (...) {if(c)c->settings_save_result=GL_LIMIT;}
 int32_t GL_CALL gl_set_language(gl_context* c,const char* language) try {
     if(!c||!language)return GL_INVALID;
     if(c->language==language)return GL_OK;
@@ -489,6 +518,13 @@ int32_t GL_CALL gl_set_menu_key(gl_context* c,uint32_t key) try {
     c->menu_key=key;c->emit(GL_EVENT_SETTING,0,0,key,"ui.menu_key");return save_change(c);
 }catch(...){return GL_LIMIT;}
 uint32_t GL_CALL gl_get_menu_key(const gl_context* c){return c?c->menu_key:0;}
+int32_t GL_CALL gl_set_gamepad_menu_shortcut(gl_context* c,uint32_t enabled) try {
+    if(!c||enabled>1)return GL_INVALID;
+    if(c->gamepad_menu_shortcut==bool(enabled))return GL_OK;
+    c->gamepad_menu_shortcut=enabled!=0;c->menu_chord_armed=false;
+    c->emit(GL_EVENT_SETTING,0,0,enabled,"ui.gamepad_menu_shortcut");return save_change(c);
+}catch(...){return GL_LIMIT;}
+uint32_t GL_CALL gl_get_gamepad_menu_shortcut(const gl_context* c){return c&&c->gamepad_menu_shortcut;}
 const char* GL_CALL gl_get_settings_path(const gl_context* c){return c?c->settings_path.c_str():"";}
 int32_t GL_CALL gl_set_settings_path(gl_context* c,const char* path) try {
     if(!c||!path)return GL_INVALID;if(c->settings_path!=path){c->settings_path=path;c->settings_save_result=GL_OK;}return GL_OK;
@@ -509,16 +545,16 @@ int32_t GL_CALL gl_load_settings(gl_context* c,const char* path) try {
         values[key]=trim(line.substr(pos+1));
     }
     if(file.bad())return GL_IO_ERROR;
-    double schema=1;
-    if(values.count("schema")&&!parse_number(values["schema"],schema))return GL_INVALID;
-    if(schema>17)return GL_NEWER_SCHEMA;if(schema<1||schema!=std::floor(schema))return GL_INVALID;
-    values.erase("schema");
+    const auto schema=values.find("schema");
+    if(schema==values.end())return GL_INVALID;
+    if(const auto status=schema_status(schema->second);status!=GL_OK)return status;
+    values.erase(schema);
     std::string language=c->language;
     if(auto it=values.find("ui.language");it!=values.end()){
         if(!known_language(it->second.c_str()))return GL_INVALID;
         language=it->second;values.erase(it);
     }
-    uint32_t menu_key=10; // Old files and a removed key use F10; an empty value disables it.
+    uint32_t menu_key=10; // An absent key uses F10; an empty value disables it.
     if(auto it=values.find("ui.menu_key");it!=values.end()){
         const auto& key=it->second;menu_key=0;
         if(!key.empty()){
@@ -528,137 +564,126 @@ int32_t GL_CALL gl_load_settings(gl_context* c,const char* path) try {
         }
         values.erase(it);
     }
-    // Library v1 -> v2 migration: legacy smoothing seconds becomes milliseconds.
-    if(schema==1 && values.count("gyro.smoothing_seconds")) {
-        double seconds;if(!parse_number(values["gyro.smoothing_seconds"],seconds))return GL_INVALID;
-        if(!values.count("gyro.smoothing_ms"))values["gyro.smoothing_ms"]=std::to_string(seconds*1000);
-        values.erase("gyro.smoothing_seconds");
+    bool gamepad_menu_shortcut=true;
+    if(auto it=values.find("ui.gamepad_menu_shortcut");it!=values.end()){
+        if(it->second!="0"&&it->second!="1")return GL_INVALID;
+        gamepad_menu_shortcut=it->second=="1";values.erase(it);
     }
-    auto pending=defaults();pending[AutoCal]=c->settings[AutoCal];
+    double automatic_calibration=c->settings[AutoCal];
     auto profiles=c->context_settings;std::map<std::string,std::string> unknown;
+    auto links=c->profile_links;std::map<uint32_t,uint32_t> parents;
     std::map<uint32_t,std::map<int,double>> edits;
-    auto seed=defaults();bool has_seed=false,has_flat_profile=false;
-    // v2 had hard-coded aim conditions. Preserve their mode but require an explicit
-    // new context selection. Keep old multiplier keys as unknown migration data.
-    if(schema<3){pending[GyroContext]=0;pending[FlickContext]=0;}
+    std::map<uint32_t,std::bitset<SettingCount>> explicitly_inherited;
     for(const auto& [key,text]:values) {
         uint32_t context_id;int field;
+        if(key.starts_with("context.")&&key.ends_with(".inherit")){
+            const auto probe=key.substr(0,key.size()-8)+".sensitivity_x";double parent;
+            if(!context_setting(probe.c_str(),context_id,field)||!parse_number(text,parent)||
+                parent<0||parent>UINT32_MAX||parent!=std::floor(parent))return GL_INVALID;
+            parents[context_id]=static_cast<uint32_t>(parent);continue;
+        }
         if(context_setting(key.c_str(),context_id,field)) {
+            if(!persisted_profile_setting(field))return GL_INVALID;
+            if(text=="inherit"){explicitly_inherited[context_id].set(field);continue;}
             double number;const auto& d=definitions[field];
             if(!parse_number(text,number)||number<d.min||number>d.max||!valid_profile_value(field,number))return GL_INVALID;
             edits[context_id][field]=quantize(field,number);continue;
         }
-        if(key.starts_with("migration.profile.")){
-            int i=setting_index(key.c_str()+18);double number;
-            if(i<0){unknown[key]=text;continue;}
-            if(!parse_number(text,number)||number<definitions[i].min||number>definitions[i].max||
-               (context_selector(i)&&number!=std::floor(number)))return GL_INVALID;
-            seed[i]=quantize(i,number);has_seed=true;continue;
-        }
-        int i=setting_index(key.c_str());if(i<0){unknown[key]=text;continue;}
-        double number;if(!parse_number(text,number)||number<definitions[i].min||number>definitions[i].max)return GL_INVALID;
-        if(context_selector(i)&&number!=std::floor(number))return GL_INVALID;
-        pending[i]=quantize(i,number);
-        has_flat_profile|=profile_setting(i);
+        int field_index=setting_index(key.c_str());
+        if(field_index<0){unknown[key]=text;continue;}
+        if(field_index!=AutoCal)return GL_INVALID; // settings always belong to a named view
+        double number;const auto& d=definitions[AutoCal];
+        if(!parse_number(text,number)||number<d.min||number>d.max)return GL_INVALID;
+        automatic_calibration=quantize(AutoCal,number);
     }
-    if(schema<6){seed=pending;has_seed=has_flat_profile;}
-    const bool flat_only=schema<10&&has_flat_profile&&edits.empty()&&!has_seed;
-    const bool old_single=schema<6&&has_flat_profile&&edits.empty();
-    if(flat_only||old_single){
-        // A former implicit camera can only be assigned unambiguously to one view.
-        if(c->gameplay_contexts.size()!=1)return GL_UNAVAILABLE;
-        auto value=pending;
-        if(schema<6)value=migrate_profile(value,0);
-        if(schema<7)migrate_activation(value);
-        if(!valid_profile_value(Activation,value[Activation])||!valid_profile_value(FlickMode,value[FlickMode]))return GL_INVALID;
-        value[GyroContext]=value[FlickContext]=0;
-        profiles[c->gameplay_contexts.begin()->first]=value;
-        has_seed=false;
-    }
-    if(has_seed){
-        // All current views must be registered before importing a shared legacy profile.
-        // Materialize it now; future new views start from defaults, never a hidden seed.
-        if(c->gameplay_contexts.empty())return GL_UNAVAILABLE;
-        for(const auto& [id,state]:c->gameplay_contexts){
-            auto old=profiles.at(id);auto profile=migrate_profile(seed,id);
-            profile[SensX]=old[SensX];profile[SensY]=old[SensY];profiles[id]=profile;
-        }
-    }
+    for(const auto& [id,parent]:parents){profiles[id]=defaults();links.erase(id);}
+    for(const auto& [id,fields]:edits){profiles[id]=defaults();links.erase(id);}
     for(const auto& [id,fields]:edits){
-        auto [it,inserted]=profiles.try_emplace(id,has_seed?migrate_profile(seed,id):defaults());
+        auto [it,inserted]=profiles.try_emplace(id,defaults());
         for(auto [field,value]:fields)it->second[field]=value;
     }
-    if(schema<7)for(auto& [id,profile]:profiles)migrate_activation(profile);
+    for(const auto& [id,parent]:parents)if(parent){
+        auto& link=links[id];link.parent=parent;
+        if(auto fields=edits.find(id);fields!=edits.end())for(const auto& [f,value]:fields->second)link.overrides.set(f);
+    }
+    for(const auto& [id,fields]:explicitly_inherited){
+        // An explicit marker is meaningful only in a linked row from this file.
+        if(!parents.count(id)||!parents.at(id)||!links.count(id))return GL_INVALID;
+    }
+    if(!valid_links(profiles,links))return GL_INVALID;
+    // Selecting a preset in a partial inherited row has the same meaning as
+    // selecting it through the API: own the curve, derive omitted components.
+    for(auto& [id,link]:links){
+        const auto fields=edits.find(id);if(fields==edits.end())continue;
+        const auto choice=fields->second.find(Acceleration);
+        if(choice==fields->second.end()||choice->second>=4)continue;
+        auto preset=resolve_profile(profiles,links,id);preset[Acceleration]=choice->second;apply_acceleration_preset(preset);
+        for(int field=FastSensX;field<=FastSpeed;++field)if(!fields->second.count(field)&&!explicitly_inherited[id][field]){
+            profiles.at(id)[field]=preset[field];link.overrides.set(field);
+        }
+    }
     for(auto& [id,profile]:profiles){
-        const auto profile_edits=edits.find(id);
-        const bool disabled_alias=profile_edits!=edits.end()&&profile_edits->second.count(Enabled)&&!profile_edits->second.at(Enabled);
-        if((schema<16&&!profile[Enabled])||disabled_alias)profile[Activation]=GL_GYRO_OFF;
         profile[Enabled]=int(profile[Activation])!=GL_GYRO_OFF;
-        // Before schema 17 Invert X reversed the complete Yaw + Roll sum.
-        // Initialize both source inversions alike, unless the new field was
-        // explicitly supplied. Invert Y and signed roll contribution are kept.
-        if(schema<17&&(profile_edits==edits.end()||!profile_edits->second.count(InvertRoll)))
-            profile[InvertRoll]=profile[InvertX];
-        if(schema<14){
-            if(!edits.count(id)||!edits.at(id).count(HoldInvert))profile[HoldInvert]=profile[TemporaryInvertButton]!=0;
-            if(!edits.count(id)||!edits.at(id).count(HoldTrackball))profile[HoldTrackball]=profile[TrackballButton]!=0;
-        }
-        profile[TemporaryInvertButton]=profile[TrackballButton]=profile[StickEffect]=0;
-        if(schema<13&&(!edits.count(id)||!edits.at(id).count(FlickSmoothSpeed)))
-            profile[FlickSmoothSpeed]=quantize(FlickSmoothSpeed,profile[FlickSmoothAngle]*30);
+        if(links.count(id))continue; // Partial inherited rows resolve against the parent below.
         if(profile[FlickStickInner]>=profile[FlickStickOuter]||profile[FlickPadInner]>=profile[FlickPadOuter])return GL_INVALID;
-        if(schema<12){
-            if(profile[Acceleration]<4)apply_acceleration_preset(profile);
-            else if(auto edit=edits.find(id);edit!=edits.end()&&edit->second.count(Acceleration)){
-                // Schema 11's Custom defaults were 5x, including partial INIs.
-                if(!edit->second.count(FastSensX))profile[FastSensX]=5;
-                if(!edit->second.count(FastSensY))profile[FastSensY]=5;
-            }
-        }
-        else if(profile[Acceleration]<4){
+        if(profile[Acceleration]<4){
             auto preset=profile;apply_acceleration_preset(preset);
+            if(auto fields=edits.find(id);fields!=edits.end())
+                for(int field=FastSensX;field<=FastSpeed;++field)
+                    if(!fields->second.count(field))profile[field]=preset[field];
             for(int field=FastSensX;field<=FastSpeed;++field)if(std::abs(profile[field]-preset[field])>1e-8){
                 profile[Acceleration]=4;break; // Preserve manual INI curve edits.
             }
         }
     }
     // Transaction: no setting changes on malformed or newer files.
+    const auto before=c->profile_snapshot();
     SettingsBatch batch(c);
-    gl_setting_set(c,definitions[AutoCal].id,pending[AutoCal]);
-    for(const auto& [id,state]:c->gameplay_contexts) {
-        const auto& profile=profiles.at(id);
-        for(int field=0;field<SettingCount;++field)if(profile_setting(field)&&field!=Enabled)gl_setting_set(c,state.setting_ids[field].c_str(),profile[field]);
-    }
-    c->context_settings=std::move(profiles);c->settings_need_upgrade=schema<17;
+    gl_setting_set(c,definitions[AutoCal].id,automatic_calibration);
+    c->context_settings=std::move(profiles);c->profile_links=std::move(links);
+    c->profiles_changed(before);c->emit(GL_EVENT_CONTEXT,6);
     gl_set_language(c,language.c_str());
     gl_set_menu_key(c,menu_key);
+    gl_set_gamepad_menu_shortcut(c,gamepad_menu_shortcut);
     c->unknown_settings=std::move(unknown);c->settings_path=std::move(remembered_path);c->settings_save_result=GL_OK;return GL_OK;
 } catch (...) {return GL_IO_ERROR;}
 static int32_t write_settings(gl_context* c,const char* path) try {
     if(!c||!path||!*path)return GL_INVALID;
     std::string remembered_path(path);
     auto destination=std::filesystem::path(reinterpret_cast<const char8_t*>(path)),temporary=destination;temporary+=".tmp";
-    // Do not overwrite a future-schema file even if the caller ignored load's status.
+    // Never overwrite an unsupported/missing format, even after a failed load.
     if(std::filesystem::exists(destination)) {
-        std::ifstream existing(destination);if(!existing)return GL_IO_ERROR;std::string line;
+        std::ifstream existing(destination);if(!existing)return GL_IO_ERROR;
+        std::string line;bool found=false;
         while(std::getline(existing,line)) {
+            line=trim(line);if(line.empty()||line[0]=='#'||line[0]==';')continue;
             auto pos=line.find('=');if(pos!=std::string::npos&&trim(line.substr(0,pos))=="schema") {
-                double schema;if(!parse_number(trim(line.substr(pos+1)),schema))return GL_INVALID;
-                if(schema>17)return GL_NEWER_SCHEMA;
+                if(found)return GL_INVALID;found=true;
+                if(const auto status=schema_status(trim(line.substr(pos+1)));status!=GL_OK)return status;
             }
         }
+        if(existing.bad())return GL_IO_ERROR;if(!found)return GL_INVALID;
     }
     std::ofstream file(temporary,std::ios::trunc);if(!file)return GL_IO_ERROR;
-    file.imbue(std::locale::classic());file<<"# GyroLib settings; schema 17\nschema=17\n"
+    file.imbue(std::locale::classic());file<<"# GyroLib settings\nschema=" GL_SETTINGS_SCHEMA "\n"
         "# Menu shortcut: F1..F24, or leave ui.menu_key= empty to disable. Restart after editing.\n"
         "ui.menu_key=";
     if(c->menu_key)file<<'F'<<c->menu_key;
+    file<<"\n# Back + Start opens the panel. Set 0 to disable.\nui.gamepad_menu_shortcut="<<int(c->gamepad_menu_shortcut);
     file<<"\nui.language="<<c->language<<'\n'<<std::setprecision(12);
     file<<"calibration.automatic="<<c->settings[AutoCal]<<'\n';
     for(const auto& [id,profile]:c->context_settings){
         file<<"\n# View "<<id<<'\n';
+        auto link=c->profile_links.find(id);
+        if(link!=c->profile_links.end())file<<"context."<<id<<".inherit="<<link->second.parent<<'\n';
         for(int field=0;field<SettingCount;++field)
-            if(profile_setting(field)&&field!=Enabled&&field!=FlickSmoothAngle&&field!=TemporaryInvertButton&&field!=TrackballButton&&field!=StickEffect)file<<profile_key(id,field)<<'='<<profile[field]<<'\n';
+            if(persisted_profile_setting(field)&&
+                (link==c->profile_links.end()||link->second.overrides[field]))file<<profile_key(id,field)<<'='<<profile[field]<<'\n';
+        // A local preset normally derives omitted curve components on load.
+        // Preserve components explicitly restored to the parent, even when equal.
+        if(link!=c->profile_links.end()&&link->second.overrides[Acceleration]&&profile[Acceleration]<4)
+            for(int field=FastSensX;field<=FastSpeed;++field)if(!link->second.overrides[field])
+                file<<profile_key(id,field)<<"=inherit\n";
     }
     for(const auto& [key,value]:c->unknown_settings)file<<key<<'='<<value<<'\n';
     file.flush();if(!file)return GL_IO_ERROR;file.close();if(!file)return GL_IO_ERROR;
@@ -667,7 +692,7 @@ static int32_t write_settings(gl_context* c,const char* path) try {
 #else
     std::error_code error;std::filesystem::rename(temporary,destination,error);if(error)return GL_IO_ERROR;
 #endif
-    c->settings_path=std::move(remembered_path);c->settings_need_upgrade=false;return GL_OK;
+    c->settings_path=std::move(remembered_path);return GL_OK;
 } catch (...) {return GL_IO_ERROR;}
 int32_t GL_CALL gl_save_settings(gl_context* c,const char* path){
     const auto result=write_settings(c,path);if(c)c->settings_save_result=result;return result;

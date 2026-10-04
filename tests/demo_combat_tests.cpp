@@ -53,7 +53,85 @@ void aiming_and_trigger(){
     h.equip(0);game.tick(.2,input);game.tick(.14,input);require(h.shots==shots+3,"Rifle should repeat while trigger is held");
     input.inventory_press=true;game.tick(.5,input);require(h.shots==shots+3,"inventory must block all firing");
 }
-void controller_short_press(){
+void weapon_recoil(){
+    std::array<double,4> peaks{},remaining{};
+    for(int weapon:{tps::Rifle,tps::Sniper,tps::Pistol,tps::Shotgun}){
+        Game game;auto& h=game.host;h.equip(weapon);h.pitch=0;
+        h.fire();peaks[weapon]=h.view_pitch();
+        require(h.kick>0&&h.kick_yaw!=0&&h.weapon_kick>0,"every weapon needs camera rise, lateral recoil and weapon push");
+        require(h.yaw==0&&h.pitch==0&&h.camera_yaw_total==0,"weapon recoil must not rewrite player aim or gyro deltas");
+        const auto peak=h.kick,side=h.kick_yaw,push=h.weapon_kick;
+        const auto count=h.recoil_shots[weapon];h.fire();
+        require(h.kick==peak&&h.recoil_shots[weapon]==count,"a blocked shot must not add recoil");
+        const auto f=h.forward(),r=h.right(),u=h.up();
+        require(std::abs(tps::dot(f,r))<1e-10&&std::abs(tps::dot(f,u))<1e-10&&std::abs(tps::dot(r,u))<1e-10,
+            "recoil must keep the rendered camera basis orthogonal");
+        h.rotate(2,-1);
+        require(std::abs(h.view_pitch()-(peak-1))<1e-10&&std::abs(h.view_yaw()-(side+2))<1e-10,
+            "player and gyro rotations must remain additive during recoil");
+        game.tick(.2);remaining[weapon]=h.kick/peak;
+        require(h.kick<peak&&std::abs(h.kick_yaw)<std::abs(side)&&h.weapon_kick<push,"recoil must recover on both axes and the model");
+        // Same elapsed recovery at different update rates, with no new shot.
+        for(int fps:{30,60,144}){
+            Game timed;timed.host.equip(weapon);timed.host.fire();
+            for(int i=0;i<fps;++i)timed.tick(1.0/fps);
+            const auto& profile=tps::weapons[weapon].recoil;
+            require(std::abs(timed.host.kick-peak*std::exp(-1/profile.recovery))<1e-10&&
+                std::abs(timed.host.kick_yaw-side*std::exp(-1/profile.recovery))<1e-10&&
+                std::abs(timed.host.weapon_kick-push*std::exp(-1/profile.push_recovery))<1e-10,
+                "recoil recovery cannot depend on frame rate");
+        }
+        // Follow-up rounds use the recoiled reticle, including horizontal kick.
+        for(auto& target:h.targets)target.position={30,30,40};
+        h.targets[0].position=h.eye()+h.forward()*12;h.cooldown=0;
+        const auto muzzle=h.muzzle();h.fire();
+        require(h.shot_impacts[0].zone==0&&tps::dot(h.shot_start-muzzle,h.shot_start-muzzle)<1e-10,
+            "follow-up shots must agree with the recoiled camera and still start at the muzzle");
+        const auto saved=h.kick;h.reload();h.cooldown=0;h.fire();
+        require(h.kick==saved,"reloading must not generate recoil");
+        h.reload_elapsed=-1;h.magazines[weapon]=0;h.fire();require(h.kick==saved,"empty magazines must not generate recoil");
+    }
+    require(peaks[tps::Rifle]<peaks[tps::Pistol]&&peaks[tps::Pistol]<peaks[tps::Sniper]&&peaks[tps::Sniper]<peaks[tps::Shotgun],
+        "weapon kicks must have distinct strength, with shotgun strongest");
+    require(remaining[tps::Pistol]<remaining[tps::Rifle]&&remaining[tps::Rifle]<remaining[tps::Shotgun]&&remaining[tps::Shotgun]<remaining[tps::Sniper],
+        "pistol must recover quickly and sniper more slowly");
+    Game burst;auto& h=burst.host;tps::Input held{};held.fire_held=true;
+    burst.tick(.01,held);const auto first=h.kick;
+    double peak=first;
+    for(int i=0;i<55;++i){burst.tick(.01,held);peak=std::max(peak,h.kick);}
+    require(h.shots>=4&&peak>first*1.7&&peak<=h.weapon().recoil.max_pitch,"automatic rifle fire must build bounded recoil");
+    const auto pitch=h.view_pitch(),yaw=h.view_yaw(),push=h.weapon_kick;
+    tps::Input blocked{};blocked.focused=false;burst.tick(.5,blocked);
+    blocked={};blocked.pause_press=true;burst.tick(.5,blocked);burst.tick(.5);burst.tick(0,blocked);
+    gl_set_panel_open(burst.context.get(),1);burst.tick(.5);gl_set_panel_open(burst.context.get(),0);
+    blocked={};blocked.inventory_press=true;burst.tick(.5,blocked);burst.tick(.5);
+    require(h.view_pitch()==pitch&&h.view_yaw()==yaw&&h.weapon_kick==push,"menus and focus loss must freeze all recoil");
+    burst.tick(0,blocked);blocked={};blocked.recenter_press=true;burst.tick(.01,blocked);
+    require(h.view_pitch()==0&&h.kick_yaw==0&&h.weapon_kick==0,"recenter must clear recoil along with pitch");
+    h.cooldown=0;h.fire();h.equip(tps::Pistol);
+    require(h.kick==0&&h.kick_yaw==0&&h.weapon_kick==0,"direct weapon changes must clear the previous recoil");
+    Game shotgun;shotgun.host.equip(tps::Shotgun);shotgun.host.fire();
+    require(shotgun.host.impact_count==9&&shotgun.host.recoil_shots[tps::Shotgun]==1,
+        "a shotgun blast produces one recoil impulse, not one per pellet");
+}
+void controller_menu_shortcut(){
+    Game game;auto* c=game.context.get();gl_endpoint e{};
+    e.id=e.physical_id=1;e.connected=1;e.source=GL_SOURCE_SDL;e.caps.buttons=(1u<<4)|(1u<<6);
+    require(gl_register_endpoint(c,&e)==GL_OK,"shortcut controller registration");
+    const auto frame=[&](uint32_t buttons){
+        gl_controls controls{};controls.timestamp_ns=game.now+16000000;controls.buttons=buttons;
+        require(gl_submit_controls(c,1,&controls)==GL_OK,"shortcut controller input");
+        tps::Input in{};in.controller_id=1;in.controller_buttons=buttons;game.tick(.016,in);
+    };
+    frame(0);frame((1u<<4)|(1u<<6));
+    require(gl_panel_open(c)&&!game.host.paused,"chord should open GyroLib without also pausing the demo");
+    frame((1u<<4)|(1u<<6));require(gl_panel_open(c),"holding the chord must not repeat");
+    frame(0);frame((1u<<4)|(1u<<6));
+    require(!gl_panel_open(c)&&!game.host.paused,"chord should close GyroLib without pausing");
+    gl_set_gamepad_menu_shortcut(c,0);frame(0);frame((1u<<4)|(1u<<6));
+    require(!gl_panel_open(c)&&game.host.paused,"disabled chord must leave Start available for Pause");
+}
+void controller_block_long_press(){
     for(auto mode:{GL_HOLD,GL_HOLD_DISABLE})for(uint64_t duration:{50000000ull,199999999ull,200000000ull,350000000ull}){
         Game game;auto* c=game.context.get();auto& h=game.host;
         gl_endpoint e{};e.id=e.physical_id=1;e.connected=1;e.source=GL_SOURCE_SDL;
@@ -62,7 +140,7 @@ void controller_short_press(){
             const auto prefix="context."+std::to_string(id)+".";
             gl_setting_set(c,(prefix+"gyro.activation").c_str(),mode);
             gl_setting_set(c,(prefix+"activation.button").c_str(),tps::ButtonWest+1);
-            gl_setting_set(c,(prefix+"activation.short_press").c_str(),1);
+            gl_setting_set(c,(prefix+"activation.block_long_press").c_str(),1);
         }
         tps::Input in{};in.controller_id=1;
         const auto tick=[&](uint64_t elapsed=10000000){
@@ -94,10 +172,10 @@ void controller_short_press(){
         h.reload_elapsed=-1;in.controller_buttons=0;tick(50000000);
         require(!h.reloading(),"a forwarded hold must not create a second action on release");
         in.native_hold=false;tick();
-        gl_setting_set(c,"context.205.activation.short_press",0);
+        gl_setting_set(c,"context.205.activation.block_long_press",0);
         in.controller_buttons=1u<<tps::ButtonWest;tick();require(h.reloading(),"unchecked filter must reload immediately on press");
         h.reload_elapsed=-1;in.controller_buttons=0;tick();
-        gl_setting_set(c,"context.205.activation.short_press",1);gl_setting_set(c,"context.205.gyro.activation",GL_TOGGLE);
+        gl_setting_set(c,"context.205.activation.block_long_press",1);gl_setting_set(c,"context.205.gyro.activation",GL_TOGGLE);
         in.controller_buttons=1u<<tps::ButtonWest;tick();require(h.reloading(),"saved hold filter must stay inactive for Toggle");
     }
 }
@@ -116,7 +194,7 @@ void target_zones(){
     Game game;auto& h=game.host;
     const auto initial=h.targets[2].position.x;game.tick(.5);
     require(std::abs(h.targets[2].position.x-initial)>.5,"one target should move");
-    require(h.targets[0].position.x==-4&&h.targets[1].position.x==.8,"other targets must stay still");
+    require(h.targets[0].position.x==-7&&h.targets[1].position.x==.8,"static targets must stay still");
     h.player={-6.85,0,0};h.targets[0].position={-6,.72,8};h.pitch=std::atan2(.72-2.6,14)/tps::rad;
     h.fire();require(h.last_hit_zone==-1&&h.shot_end.z<8,"cover must stop shots before the target");
 }
@@ -161,7 +239,64 @@ void shared_standard_profile(){
         require(std::abs(game.host.output.yaw_degrees-.672)<.0001,"shared sensitivity edit must immediately apply to Rifle, Pistol and Shotgun");
     }
     game.host.equip(tps::Sniper);tick();
-    require(gl_get_active_gameplay_context(c)==206&&game.host.scoped()&&std::abs(game.host.output.yaw_degrees-.096)<.0001,"Sniper must keep its independent gain and scope");
+    require(gl_get_active_gameplay_context(c)==206&&game.host.scoped()&&std::abs(game.host.output.yaw_degrees-.192)<.0001,"Sniper must keep its independent gain and scope");
+}
+void sniper_variable_zoom(){
+    Game game;auto* c=game.context.get();auto& h=game.host;h.equip(tps::Sniper);h.pitch=0;
+    gl_endpoint e{};e.id=e.physical_id=445;e.source=GL_SOURCE_SDL;e.connected=1;e.caps={0xffffffffu,0,0,0,3,1,1};
+    require(gl_register_endpoint(c,&e)==GL_OK,"zoom sensor setup failed");
+    gl_setting_set(c,"context.206.gyro.space",GL_SPACE_LOCAL_YAW);
+    tps::Input in{};in.aim=true;in.controller_id=e.id;
+    const auto tick=[&]{const auto now=game.now+16000000;gl_sample sample{now,now,{10,-12,0},{0,1,0}};
+        gl_controls controls{};controls.timestamp_ns=now;controls.buttons=in.controller_buttons;
+        gl_submit_sample(c,e.id,&sample);gl_submit_controls(c,e.id,&controls);game.tick(.016,in);};
+    for(int n=0;n<4;++n)tick();const auto base=h.output;
+    require(h.fov()==20&&std::abs(base.yaw_degrees-.192)<1e-6&&std::abs(base.pitch_degrees-.16)<1e-6,"first zoom keeps the sniper's configured sensitivity");
+    in.zoom_press=true;tick();in.zoom_press=false;
+    const double ratio=std::tan(5*tps::rad)/std::tan(10*tps::rad);
+    require(h.fov()==10&&h.sniper_zoom==1&&h.mode()==tps::AimSniper&&gl_menu_tab_count(c)==4,"zoom stays in the same sniper view");
+    require(std::abs(h.output.yaw_degrees/base.yaw_degrees-ratio)<1e-6&&std::abs(h.output.pitch_degrees/base.pitch_degrees-ratio)<1e-6,"both gyro axes scale on the same frame as the rendered zoom");
+    double sensitivity=0;gl_setting_get(c,"context.206.sensitivity_x",&sensitivity);require(sensitivity==1,"zoom cannot rewrite the saved sensitivity");
+    gl_setting_set(c,"context.206.gyro.zoom_compensation",0);tick();
+    require(h.fov()==10&&std::abs(h.output.yaw_degrees-base.yaw_degrees)<1e-6,"disabling compensation keeps magnification and restores full gyro gain");
+    gl_setting_set(c,"context.206.gyro.zoom_compensation",1);
+    in.controller_buttons=1u<<tps::ButtonSouth;tick();require(h.sniper_zoom==0,"controller confirm button switches zoom while scoped");
+    for(int n=0;n<4;++n)tick();require(h.sniper_zoom==0,"holding the zoom button must not cycle repeatedly");
+    in.controller_buttons=0;tick();in.controller_buttons=1u<<tps::ButtonSouth;tick();require(h.sniper_zoom==1,"a new press cycles to the second level");in.controller_buttons=0;
+    in.zoom_press=true;in.focused=false;tick();require(h.sniper_zoom==1,"focus loss must block zoom");in.focused=true;
+    gl_set_panel_open(c,1);tick();require(h.sniper_zoom==1,"F10 must block zoom");gl_set_panel_open(c,0);
+    h.paused=true;tick();require(h.sniper_zoom==1,"pause must block zoom");h.paused=false;
+    h.inventory=true;tick();require(h.sniper_zoom==1,"inventory confirmation must not switch zoom");h.inventory=false;
+    h.magazines[tps::Sniper]--;in.reload_press=true;tick();in.reload_press=false;
+    require(!h.scoped()&&h.sniper_zoom==1&&std::abs(h.output.yaw_degrees-base.yaw_degrees)<1e-6,"reload ignores zoom presses and bypasses the old scoped FOV");
+    in.zoom_press=false;game.tick(2.3,in);require(h.scoped()&&h.sniper_zoom==1&&h.fov()==10,"returning to scope remembers its zoom level");
+    for(uint32_t view:{tps::Explore,tps::AimStandard,tps::AimSniper,tps::Inventory}){
+        const auto id="context."+std::to_string(view)+".gyro.zoom_compensation";bool found=false;
+        for(uint32_t n=0;n<gl_menu_tab_setting_count(c,uint64_t(view)+1);++n){gl_setting_info info{};
+            gl_menu_tab_setting_at(c,uint64_t(view)+1,n,&info);if(info.id==id){found=true;require(bool(info.visible)==(view==tps::AimSniper),"only the variable-zoom view exposes compensation");}}
+        require(found,"zoom metadata missing");
+    }
+}
+void extended_range(){
+    Game game;auto& h=game.host;require(h.targets.size()==15,"range should contain fifteen targets");
+    const auto initial=h.targets;game.tick(.5);
+    unsigned stationary=0,horizontal=0,vertical=0,combined=0;double furthest=0;
+    for(size_t n=0;n<h.targets.size();++n){const auto& t=h.targets[n];furthest=std::max(furthest,t.position.z);
+        const bool x=t.travel.x!=0,y=t.travel.y!=0;
+        stationary+=!x&&!y;horizontal+=x&&!y;vertical+=!x&&y;combined+=x&&y;
+        require((std::abs(t.position.x-initial[n].position.x)>.001)==x&&(std::abs(t.position.y-initial[n].position.y)>.001)==y,"target motion must follow its declared axes");
+        for(int k=0;k<600;++k){auto sample=t;sample.update(k*.1);
+            require(sample.position.y-tps::Target::radius>.1&&std::abs(sample.position.x)+tps::Target::radius<12,"target paths must remain inside the range and above ground");}
+    }
+    require(stationary&&horizontal&&vertical&&combined&&furthest>110,"range must include all four motion patterns at long range");
+    const auto frozen=h.targets;tps::Input input{};input.focused=false;game.tick(.5,input);
+    for(size_t n=0;n<h.targets.size();++n)require(tps::dot(h.targets[n].position-frozen[n].position,h.targets[n].position-frozen[n].position)==0,"focus loss freezes every target");
+    for(auto& t:h.targets)t.position={30,30,140};
+    h.equip(tps::Sniper);h.scope_view=true;h.zoom_degrees=10;h.pitch=0;h.yaw=0;
+    h.targets[0].position=h.eye()+h.forward()*112;h.fire();
+    require(h.last_hit_zone==0&&h.shot_end.z>110,"shots must reach the new distant targets from the weapon muzzle");
+    input={};input.move_z=1;h.player={0,0,110};game.tick(1,input);
+    require(h.player.z>110&&h.player.z<=tps::range_end-4,"the extended range must be walkable");
 }
 void pistol_and_shotgun(){
     for(int weapon:{tps::Pistol,tps::Shotgun}){
@@ -231,8 +366,8 @@ void muzzle_shots(){
     h.fire();
     require(h.shot_impacts[0].target==-1&&h.shot_end.z<8,"muzzle-side cover must block a camera-visible target");
     // The barrel itself crosses a wall: no shot may originate on its far side.
-    Game wall;auto& w=wall.host;w.player={0,0,42};w.pitch=0;w.targets[0].position={.8,1.65,47};
-    w.fire();require(w.shot_end.z<=42.5+1e-9,"a protruding barrel must not bypass the wall");
+    Game wall;auto& w=wall.host;w.player={0,0,tps::range_end-1};w.pitch=0;w.targets[0].position={.8,1.65,tps::range_end+4};
+    w.fire();require(w.shot_end.z<=tps::range_end-.5+1e-9,"a protruding barrel must not bypass the wall");
 }
 void calibration_menus(){
     Game game;auto& h=game.host;auto* c=game.context.get();
@@ -261,5 +396,5 @@ void calibration_menus(){
     tick(in);require(!h.paused,"back from pause must resume gameplay");
 }
 }
-int main(){reload_and_weapons();aiming_and_trigger();controller_short_press();target_zones();sniper_scope();shared_standard_profile();pistol_and_shotgun();camera_orbit();muzzle_shots();calibration_menus();
-    std::cout<<"Demo combat: weapons, profiles, scope, reload, spread, camera orbit, muzzle traces and cover passed\n";}
+int main(){controller_menu_shortcut();reload_and_weapons();aiming_and_trigger();weapon_recoil();controller_block_long_press();target_zones();sniper_scope();shared_standard_profile();sniper_variable_zoom();extended_range();pistol_and_shotgun();camera_orbit();muzzle_shots();calibration_menus();
+    std::cout<<"Demo combat: weapons, recoil, profiles, variable zoom, range, reload, spread, camera orbit, muzzle traces and cover passed\n";}

@@ -1,4 +1,4 @@
-// Math adapted from ReturnalGyro contributors, MIT. No engine dependencies.
+// GyroLib motion processing (MIT). No engine dependencies.
 #include "detail/internal.hpp"
 #include "detail/projection.hpp"
 #include <algorithm>
@@ -130,12 +130,12 @@ void Motion::process(const gl_sample& s,const Settings& v,bool steam,bool menu,b
     double x=-yaw,y=pitch;
     filter_.apply(x,y,dt,v[Smoothing]/1000,v[SmoothThreshold]);
     double speed=std::hypot(x,y);
-    if(v[Tightening]>0&&speed<v[Tightening]){
+    if(v[Smoothing]>0&&v[Tightening]>0&&speed<v[Tightening]){
         x*=speed/v[Tightening];y*=speed/v[Tightening];speed=std::hypot(x,y);
     }
     // Acceleration consumes the filtered/tightened velocity, never raw sensor noise.
     double sensitivity_x=v[SensX],sensitivity_y=v[SensY];
-    {
+    if(v[Acceleration]!=0){
         // Equal/reversed breakpoints form a well-defined step, never divide by zero.
         const double blend=v[FastSpeed]>v[SlowSpeed]?std::clamp((speed-v[SlowSpeed])/(v[FastSpeed]-v[SlowSpeed]),0.0,1.0):double(speed>v[SlowSpeed]);
         // Host zoom is applied below by core, so custom X/Y retain absolute units.

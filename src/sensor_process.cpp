@@ -206,8 +206,13 @@ void sensor_process_poll(SensorProcess* p,uint64_t now,bool needed){
         if(p->used==sizeof(Record)){Record r;std::memcpy(&r,p->partial.data(),sizeof(r));p->used=0;
             if(!(valid=receive(p,r,now))){p->error="Invalid isolated sensor protocol: signature="+std::to_string(r.signature)+" version="+std::to_string(r.revision)+" kind="+std::to_string(r.kind)+" endpoint="+std::to_string(r.endpoint);break;}p->last_message=now;}
     }
-    if(!valid||exited(p)||now-p->last_message>2000000000){
-        if(valid)p->error="Isolated SDL sensor reader stopped or timed out";
+    // SDL's initial device enumeration can take several seconds on a loaded
+    // Windows host. Keep a bounded startup grace, then the short live watchdog.
+    const bool child_exited=exited(p);
+    const bool timed_out=now-p->last_message>(p->hello?2000000000ull:10000000000ull);
+    if(!valid||child_exited||timed_out){
+        if(valid)p->error=child_exited?"Isolated SDL sensor reader stopped":
+            p->hello?"Isolated SDL sensor stream timed out":"Isolated SDL sensor startup timed out";
         stop(p);p->retry=now+5000000000ull;
     }
 }

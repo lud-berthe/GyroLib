@@ -13,6 +13,7 @@ $shared=if($Static){'OFF'}else{'ON'}
 $extras=if($CoreOnly){'OFF'}else{'ON'}
 $single=if($Static -or $CoreOnly -or $Modular){'OFF'}else{'ON'}
 $arguments+=@("-DBUILD_SHARED_LIBS=$shared","-DGL_SINGLE_DLL=$single",
+    "-DGL_BUILD_OVERLAY=$(if($IsWindows){$extras}else{'OFF'})",
     "-DGL_BUILD_SDL=$extras","-DGL_BUILD_PANEL=$extras","-DGL_BUILD_EXAMPLES=$extras",'-DGL_BUILD_TESTS=ON')
 & cmake @arguments
 if($LASTEXITCODE){exit $LASTEXITCODE}

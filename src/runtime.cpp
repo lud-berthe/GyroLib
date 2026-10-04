@@ -10,6 +10,7 @@
 #include <array>
 #include <algorithm>
 #include <cstring>
+#include <cstdio>
 #include <mutex>
 #include <stdexcept>
 #include <vector>
@@ -17,7 +18,9 @@
 
 namespace {
 namespace fs=std::filesystem;
-thread_local std::string last_error,directory_text;
+thread_local char last_error[512]{};
+thread_local std::string directory_text;
+void set_error(const char* text) noexcept {std::snprintf(last_error,sizeof(last_error),"%s",text);}
 struct Handle {
     HANDLE value=INVALID_HANDLE_VALUE;
     Handle()=default;explicit Handle(HANDLE h):value(h){}
@@ -152,18 +155,20 @@ bool prepare(Runtime& state){
 }
 extern "C" {
 int32_t GL_CALL gl_runtime_prepare(void) try {
-    auto& state=runtime();std::lock_guard lock(state.mutex);last_error.clear();prepare(state);return GL_OK;
-}catch(const std::exception& e){last_error=e.what();return GL_IO_ERROR;}catch(...){last_error="Cannot prepare GyroLib runtime";return GL_LIMIT;}
-const char* GL_CALL gl_runtime_error(void){return last_error.c_str();}
+    auto& state=runtime();std::lock_guard lock(state.mutex);last_error[0]=0;prepare(state);return GL_OK;
+}catch(const std::bad_alloc&){set_error("Cannot allocate GyroLib runtime");return GL_LIMIT;}
+catch(const std::exception& e){set_error(e.what());return GL_IO_ERROR;}catch(...){set_error("Cannot prepare GyroLib runtime");return GL_LIMIT;}
+const char* GL_CALL gl_runtime_error(void){return last_error;}
 const char* GL_CALL gl_runtime_directory(void) try {
     auto& state=runtime();std::lock_guard lock(state.mutex);directory_text=utf8(state.directory);return directory_text.c_str();
 }catch(...){return "";}
 void* GL_CALL gl_runtime_sdl_handle(void){
     if(gl_runtime_prepare()!=GL_OK)return nullptr;return runtime().sdl;
 }
-int32_t GL_CALL gl_runtime_prepare_sensor_worker(void){
-    return gyrolib_runtime_worker(last_error).empty()?GL_IO_ERROR:GL_OK;
-}
+int32_t GL_CALL gl_runtime_prepare_sensor_worker(void)try{
+    std::string error;const auto worker=gyrolib_runtime_worker(error);set_error(error.c_str());
+    return worker.empty()?GL_IO_ERROR:GL_OK;
+}catch(...){set_error("Cannot allocate isolated sensor reader");return GL_LIMIT;}
 }
 std::string gyrolib_runtime_worker(std::string& error) try {
     auto& state=runtime();std::lock_guard lock(state.mutex);

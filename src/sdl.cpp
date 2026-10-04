@@ -223,7 +223,7 @@ int32_t GL_CALL gl_sdl_update(gl_sdl* self,uint64_t now,const gl_host_state* hos
 uint64_t GL_CALL gl_sdl_endpoint_for_instance(const gl_sdl* self,uint32_t instance) {
     if(self)for(const auto& p:self->pads)if(p.instance==instance)return p.info.id;return 0;
 }
-int32_t GL_CALL gl_sdl_apply_feedback(gl_sdl* self){
+int32_t GL_CALL gl_sdl_apply_feedback(gl_sdl* self)try{
     if(!self||!SDL_IsMainThread())return GL_INVALID;
     gl_touchpad_feedback feedback{};gl_get_touchpad_feedback(self->context,&feedback);
     if(!feedback.pulse||feedback.timestamp_ns==self->feedback_update)return GL_OK;
@@ -238,7 +238,7 @@ int32_t GL_CALL gl_sdl_apply_feedback(gl_sdl* self){
         return result;
     }
     return GL_UNAVAILABLE;
-}
+}catch(...){return GL_LIMIT;}
 uint64_t GL_CALL gl_sdl_steam_handle(const gl_sdl* self,uint64_t id) {
     if(self)for(const auto& p:self->pads)if(p.info.id==id)return p.steam;return 0;
 }

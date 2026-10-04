@@ -1,85 +1,95 @@
-# Licensing and provenance
+# Licenses and provenance
 
-GyroLib's adaptations retain the MIT license and copyright of ReturnalGyro
-contributors in the root `LICENSE`. Source reference:
-https://github.com/lud-berthe/Returnal-Native-Gyro . No exact public revision is
-claimed for the initial extraction from the local development copy.
+[Documentation](INDEX.md) / Maintenance
 
-| Component | Version / origin | License retained |
+GyroLib is distributed under the MIT license in the root `LICENSE`.
+Third-party components and their notices are listed below.
+
+## Notices to ship
+
+Keep `share/doc/GyroLib/licenses` with the mod package, along with SDL's alteration
+notice and relevant distribution materials. Notices may be consolidated without
+removing copyright, conditions or disclaimers. The compact binary layout does not
+remove these obligations.
+
+Embedding SDL inside `gyrolib.dll` is still redistribution. SDL's
+[licensing FAQ](https://wiki.libsdl.org/SDL3/FAQLicensing) covers static/shared and
+commercial use. The [exact version's license](https://github.com/libsdl-org/SDL/blob/release-3.4.16/LICENSE.txt)
+requires accurate origin, marking altered source versions and retaining the notice
+in source distributions. This project also includes it with binary packages.
+
+HIDAPI [offers alternative licenses](https://raw.githubusercontent.com/libsdl-org/SDL/release-3.4.16/src/hidapi/LICENSE.txt).
+This distribution retains its [BSD-style notice](https://raw.githubusercontent.com/libsdl-org/SDL/release-3.4.16/src/hidapi/LICENSE-bsd.txt).
+MIT-covered components keep their corresponding copyright/license text even when
+compiled into a DLL or executable.
+
+GyroLib adapter DLLs and its sensor worker are project components. SDL3.dll is the
+embedded third-party DLL; ImGui and GamepadMotionHelpers are compiled code. No
+Windows system DLL or MSVC runtime is embedded/copied. Release builds require the
+x64 Visual C++ runtime, distributed under [Microsoft's separate terms](https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files).
+Use its permitted deployment mechanism rather than copying arbitrary System32 DLLs.
+
+This records the dependency/licensing choices checked on 30 September 2026. It
+is not permission to redistribute arbitrary proprietary game or Steam components.
+
+## Included components
+
+| Component | Version / origin | Retained notice |
 |---|---|---|
-| GamepadMotionHelpers | v10, Julian "Jibb" Smart, from the local reference | `third_party/GamepadMotion.LICENSE` (MIT) |
-| Local gravity initialization extension | Same reference, patch retained verbatim | `third_party/patches/GamepadMotion-gravity-initialization.patch`, root MIT |
-| SDL | Altered Windows x64 build of 3.4.16, upstream touchpad backport and physical-origin properties | `third_party/SDL/LICENSE.txt` (zlib), retained changes in `third_party/patches` |
-| HIDAPI, included by SDL's controller backend | SDL release-3.4.16 vendored HIDAPI | `third_party/SDL/HIDAPI-LICENSE.txt` (BSD-style alternative selected) |
-| Dear ImGui | 1.92.9b, core and SDL3/SDL renderer backends | `third_party/imgui/LICENSE.txt` (MIT; embedded font and stb notices also remain in source) |
-| ImGui embedded fonts and stb helpers | ProggyClean / ProggyForever / stb | `third_party/imgui/FONTS-LICENSE.txt`, `third_party/imgui/STB-LICENSE.txt` |
-| Relevant localization strings | Six JSON catalogs from ReturnalGyro, adapted for this API | Root MIT |
+| GamepadMotionHelpers | v10, Julian “Jibb” Smart | `third_party/GamepadMotion.LICENSE` (MIT) |
+| Gravity initialization extension | GyroLib extension | `third_party/patches/GamepadMotion-gravity-initialization.patch`, root MIT |
+| SDL | Altered Windows x64 3.4.16 build with touchpad backport and physical-origin properties | `third_party/SDL/LICENSE.txt` (zlib), changes in `third_party/patches` |
+| HIDAPI in SDL | Vendored with release-3.4.16 | `third_party/SDL/HIDAPI-LICENSE.txt` (BSD-style alternative) |
+| Dear ImGui | 1.92.9b, core and SDL3/SDL renderer/DX12 backends | `third_party/imgui/LICENSE.txt` (MIT) |
+| Embedded fonts / stb | ProggyClean, ProggyForever, stb | `third_party/imgui/FONTS-LICENSE.txt`, `STB-LICENSE.txt` |
+| Localization | GyroLib catalogs for English, French, German, Spanish, Italian and Portuguese | Root MIT |
 
-The adaptive filtering, tightening, flick options and Lean calculations added in
-schema 11 are independently written implementations of mathematical behavior
-described by Julian "Jibb" Smart. Their sources of inspiration are linked in
-[ADVANCED_MOTION.md](ADVANCED_MOTION.md). They do not vendor or link JoyShockMapper.
-The existing GamepadMotionHelpers source and its MIT notice are unchanged.
+The independently written adaptive filters, tightening, flick options and Lean
+calculations follow mathematical descriptions linked in [motion processing](ADVANCED_MOTION.md#references-and-tests).
+JoyShockMapper is not linked or vendored. GamepadMotionHelpers and its existing
+MIT notice are retained.
 
-No Steamworks SDK or Valve binaries are downloaded or redistributed. The optional
-borrowed bridge example is for hosts already using their own Steamworks service
-and SDK, under its separate terms. Direct and isolated acquisition use the same
-marked, altered SDL build. It includes SDL's upstream Steam Controller 2015
-touchpad patch and descriptive physical-origin properties in the existing Steam
-drivers. The latter add no packet parsing or hardware configuration writes.
-The earlier in-library Triton decoder has been removed. The source archive hash,
-patches and reproduction procedure are retained in
-[the SDL change notice](../third_party/SDL/README-GyroLib.md).
-The optional right-touchpad feedback backend is independently written and uses
-protocol facts from SDL's [MsgHapticPulse output layout](https://github.com/libsdl-org/SDL/blob/release-3.4.16/src/joystick/hidapi/steam/controller_structs.h)
-and the Linux driver's [right/left pulse selector convention](https://github.com/torvalds/linux/blob/0a80b4e8ec6a6e40937c7abdf8fb2ebe6cc7c1e5/drivers/hid/hid-steam.c).
-No Linux driver implementation is copied or linked. It writes one output report,
-with no feature-report or input-decoder implementation.
-SDL's zlib notice remains in the distribution. No Returnal or
-Monster Hunter Rise assets, widgets, binaries or proprietary code are copied into
-this library. No MinHook, proxy loader, injection utility or game signatures are
-included. Brand names identify interoperability context, not endorsement.
+No proprietary game assets/widgets/code, Steamworks SDK, Valve binaries, MinHook,
+proxy loader or injection utility are included. Brand names describe interoperability,
+not endorsement. The optional typed Steam bridge is for hosts supplying their own
+licensed SDK/service under its separate terms.
 
-## Bundled runtime and redistribution
+The loaded Steam runtime bridge contains independently written declarations for
+four public flat functions and the ten-float motion record. Their signatures and
+axis comments were checked against Valve's public Steam Input headers and
+documentation.
+Those headers are not copied into this SDK. The bridge uses the game's existing
+Valve binary; GyroLib does not distribute one. The test `steam_api64.dll` is a
+local stub built from project source, never installed or shipped with a mod.
 
-Packaging our altered SDL3.dll inside GyroLib's Windows resources remains a
-redistribution of SDL. The [official SDL3 licensing FAQ](https://wiki.libsdl.org/SDL3/FAQLicensing)
-permits static and shared use, including commercial applications without royalties.
-The [license for our exact SDL version](https://github.com/libsdl-org/SDL/blob/release-3.4.16/LICENSE.txt)
-requires accurate attribution of origin, marking altered source versions, and
-retaining the notice in source distributions. We also ship it with binary packages,
-along with the alteration notice, patches and metadata helper under
-`share/doc/GyroLib/sdl-changes`. The original source archive is identified by its
-SHA256 in the reconstruction script; our dependency is not represented as an
-unmodified SDL release. SDKs built with the vendored Windows dependency also
-include its headers, import library, DLL, CMake package and notices under
-`third_party/SDL3`, so direct SDL consumers need no source checkout.
+## SDL modifications and feedback
 
-SDL's vendored HIDAPI [offers a choice of licenses](https://raw.githubusercontent.com/libsdl-org/SDL/release-3.4.16/src/hidapi/LICENSE.txt).
-For our redistribution we retain its [BSD-style notice](https://raw.githubusercontent.com/libsdl-org/SDL/release-3.4.16/src/hidapi/LICENSE-bsd.txt),
-including the copyright, conditions and disclaimer in the distributed materials.
-The listed GPL alternative does not force that choice on this distribution.
+Direct and isolated acquisition use the same marked altered SDL build. Its Steam
+Controller 2015 touchpad backport comes from upstream. Physical-origin properties
+in the existing Steam drivers add metadata, not packet parsing or configuration
+writes. Controller input parsing stays in SDL.
 
-MIT-covered code (GyroLib adaptations, GamepadMotionHelpers, ImGui, fonts and the
-selected stb license) requires the corresponding copyright and license texts to
-accompany distributed copies, even when compiled into a DLL or executable.
-Keep the installed `share/doc/GyroLib/licenses` notices with the mod package;
-they can be consolidated into a notices document without removing their content.
-The two-file mod layout describes runtime binaries, not permission to omit notices.
+The archive hash, patches and reconstruction steps are in
+[the SDL change notice](../third_party/SDL/README-GyroLib.md). Installed SDKs retain
+them under `share/doc/GyroLib/sdl-changes`. SDKs built with vendored SDL also carry
+its development package and notices under `third_party/SDL3`.
 
-The former gyrolib_sdl.dll / gyrolib_steam.dll and the sensor worker are project
-components, not third-party SDL/Valve binaries. SDL3.dll is the third-party DLL
-embedded by the new packaging; ImGui and GamepadMotionHelpers are compiled code.
-No Windows system DLLs or MSVC runtime DLLs are embedded/copied into the package.
-System DLLs are resolved from Windows. Release builds require the x64 Visual C++
-runtime, whose redistribution has [separate Microsoft terms](https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files).
-Do not copy arbitrary DLLs from System32 into a release; use the permitted official
-runtime deployment mechanism if that prerequisite needs to be provided.
+The optional right-pad feedback code independently implements one output report
+from SDL's [MsgHapticPulse layout](https://github.com/libsdl-org/SDL/blob/release-3.4.16/src/joystick/hidapi/steam/controller_structs.h)
+and the Linux driver's [pulse selector convention](https://github.com/torvalds/linux/blob/0a80b4e8ec6a6e40937c7abdf8fb2ebe6cc7c1e5/drivers/hid/hid-steam.c).
+No Linux driver implementation is copied or linked; it includes no feature-report
+or input-decoder implementation.
 
-This records the licenses and packaging choices checked on 2026-09-30, not a grant
-to redistribute arbitrary DLLs or proprietary game/Steam components.
+## ImGui backend provenance
 
-SDL API behavior was checked against the vendored headers and the
-[official SDL sensor documentation](https://wiki.libsdl.org/SDL3/SDL_GetGamepadSensorData).
-Steam scaling/lifecycle references use the
-[official ISteamInput documentation](https://partner.steamgames.com/doc/api/ISteamInput).
+The unmodified DX12 backend comes from the official
+[v1.92.9b tag](https://github.com/ocornut/imgui/tree/v1.92.9b/backends):
+
+| File | SHA-256 |
+|---|---|
+| `imgui_impl_dx12.cpp` | `364096C20FB3B873666207947F4B4890BF8233629A678396EC01290D1DD33E0F` |
+| `imgui_impl_dx12.h` | `6E11AD5BAE5B5B6339EA09545C3B4BC21F9028D7F5D1AF6B508181EB43F4323C` |
+
+The autonomous frontend isolates ImGui symbols with generated compile-time
+configuration, without editing vendor sources. DX12/DXGI and shader compiler
+libraries are Windows dependencies, not redistributed Microsoft DLLs.

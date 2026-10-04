@@ -1,138 +1,110 @@
-# Distributing a mod with one GyroLib DLL
+# Distribution
 
-The default Windows x64/MSVC shared build enables `GL_SINGLE_DLL`. The player's
-binary layout is:
+[Documentation](INDEX.md) / Integration
+
+The default Windows x64/MSVC SDK lets a mod ship this binary layout:
 
 ```text
-game.exe              existing game
-my_mod.dll            the game's hooks and renderer/input integration
-gyrolib.dll           core, acquisition, localization and bundled runtime
+game.exe       existing game
+my_mod.dll     game hooks and integration
+gyrolib.dll    gyro, acquisition, localization and optional DX12 panel
 ```
 
-Distribute license notices too, for example in the mod's existing notices folder.
-User settings are generated as `girolib.ini` beside `gyrolib.dll` when the mod
-calls `gl_initialize_settings(context, NULL, NULL)` after its initial defaults.
-Do not overwrite a player's INI in a mod update. `ui.menu_key=F10` can be changed
-to F1..F24 or left empty for a native-only menu. See [settings and panel integration](MENUS.md).
-The SDK's
-headers, `.lib` files, CMake metadata, examples and demo are for developers; they
-do not accompany a game's mod. The optional ImGui panel and its renderer backend
-are linked statically into `my_mod.dll`, so they add no runtime files.
-Microsoft's x64 Visual C++ runtime is a prerequisite of these Release builds.
+Include the [license notices](THIRD_PARTY.md) with the mod. Headers, import
+libraries, CMake files, examples and the demo are development files, not player
+requirements. Release builds require Microsoft's x64 Visual C++ runtime.
 
-## Consuming the SDK
+Calling `gl_initialize_settings(context, NULL, NULL)` creates `gyrolib.ini`
+beside the library after host defaults are registered. Do not overwrite that
+file in a mod update. [Settings](SETTINGS.md) covers its path, shortcut and errors.
 
-For a mod using only the C API (including acquisition), SDL development files are
-not required in the consuming project:
+## Link and initialize
 
-```cmake
-find_package(GyroLib CONFIG REQUIRED)
-add_library(my_mod SHARED my_mod.cpp)
-target_link_libraries(my_mod PRIVATE GyroLib::gyrolib)
-# Optional F10 panel, compiled into the mod:
-target_link_libraries(my_mod PRIVATE GyroLib::gyrolib_panel)
-```
+Use the installed [CMake targets](BUILDING.md#link-a-mod). Core includes the
+acquisition exports in the single-DLL SDK; request `Core Overlay` for the DX12
+frontend. The static Panel target is an alternative for hosts owning ImGui.
 
-Include `gyrolib/gyrolib.h`, `gyrolib/sdl.h` and optionally `gyrolib/runtime.h`.
-Initialize on the game's main thread, outside `DllMain`. `gl_sdl_create(context, 0)`
-prepares the bundled SDL; use `gl_sdl_pump_events`, `gl_sdl_poll`, then `gl_update`
-once per frame with the game's resolved states. The library does not install hooks.
-The [API guide](API.md) covers units, callbacks, lifecycle and input filtering.
+Initialize outside `DllMain`, on the context/SDL owner thread. The library
+installs no game or render hooks. [API](API.md) and [overlay integration](OVERLAY.md)
+define the callbacks to connect.
 
-`gl_runtime_prepare()` permits an explicit startup error check before creating
-the reader. `gl_runtime_error()` reports failures such as an unwritable cache.
-`gl_runtime_directory()` reports the cache location for diagnostics.
-`gl_runtime_prepare_sensor_worker()` can prewarm the reader files during startup
-to avoid disk I/O during its first use; it does not start a process.
+`gl_sdl_create(context, 0)` prepares bundled SDL automatically. Optional runtime APIs:
 
-The existing adapter target names remain available, but clients built against the
-old `gyrolib_sdl.dll` or `gyrolib_steam.dll` must be relinked against this SDK.
-ABI 1 structs and existing C function signatures have not changed.
+| Function | Use |
+|---|---|
+| `gl_runtime_prepare` | Prepare SDL early and handle startup errors explicitly |
+| `gl_runtime_error` | Read a preparation failure |
+| `gl_runtime_directory` | Get the cache path for diagnostics |
+| `gl_runtime_prepare_sensor_worker` | Prepare worker files early; does not start it |
 
-## SDL-using hosts and the demo
+When switching from separate acquisition DLLs to the single-DLL SDK, relink the
+mod against that SDK. [Versioning](VERSIONING.md#binary-contracts) defines binary
+compatibility.
 
-Hosts that call SDL directly, such as the demo's rendering backend, use:
+## Hosts that call SDL
 
-```cmake
-find_package(GyroLib CONFIG REQUIRED COMPONENTS SDL)
-target_link_libraries(my_mod PRIVATE GyroLib::gyrolib_sdl)
-```
+Direct SDL callers, including the demo, link `GyroLib::gyrolib_sdl` from the SDL
+component. The SDK includes the matching SDL headers/import library/package and
+a static MSVC delay-load shim. Calls resolve to the same verified SDL module as
+the adapter, without placing `SDL3.dll` beside the game.
 
-Configure with `CMAKE_PREFIX_PATH` pointing to the installed SDK. The default
-Windows SDK includes and discovers the matching SDL development package; no
-source checkout or separate `SDL3_DIR` is needed. The target links a small static
-MSVC delay-load shim; SDL calls resolve to the **same verified module** as the
-adapter. No `SDL3.dll` is installed beside the game. The demo uses this path.
-If a host already defines `__pfnDliNotifyHook2`, integrate the equivalent SDL case
-from `src/runtime_sdl_loader.cpp` in that hook instead of linking a second hook.
-Use `/DELAYLOAD:SDL3.dll`, `delayimp`, the SDL import library, and
-`gl_runtime_sdl_handle()` for that case. Call `gl_runtime_prepare()` before SDL
-startup so extraction failures can be handled normally instead of as delay-load
-exceptions. No preparation occurs in `DllMain`.
+If the host already defines `__pfnDliNotifyHook2`, integrate the SDL case from
+`src/runtime_sdl_loader.cpp` into that hook instead of linking another. Use
+`/DELAYLOAD:SDL3.dll`, `delayimp`, the SDL import library and
+`gl_runtime_sdl_handle()`. Prepare the runtime before SDL startup so extraction
+errors are handled as API failures rather than delay-load exceptions.
 
-A game may already load a different SDL. GyroLib loads its own absolute, verified
-path and does not replace or unload the game's SDL. Do not pass SDL pointers,
-instance IDs, renderer/gamepad handles or subsystem ownership between instances.
-`borrowed_subsystem=1` is appropriate only when the host initialized **this same
-bundled instance**. Engine commands still come from the game, not its SDL handles.
-Use the modular build when integration specifically requires the game's SDL.
+A game may load a different SDL instance. GyroLib uses its own absolute verified
+path and does not replace/unload the game's SDL. Never pass pointers, instance
+IDs, handles or subsystem ownership between instances. Borrowing is valid only
+when the host initialized this same instance. Use a modular build if integration
+requires the game's SDL.
 
-## Internal runtime cache
+## Runtime cache
 
-The DLL contains our marked SDL3 build and sensor worker as Windows resources.
-The SDL changes and retained licenses are documented in [THIRD_PARTY.md](THIRD_PARTY.md).
-At first acquisition initialization it prepares:
+SDL and the sensor worker are embedded as Windows resources. First acquisition
+initialization prepares SDL at:
 
 ```text
 %LOCALAPPDATA%/GyroLib/runtime/<payload SHA-256>/SDL3.dll
 ```
 
-When a Steam virtual controller requires the isolated reader, it also prepares
-`gyrolib_sensor_worker.exe` in that directory. The user does not install or launch
-it. Steam-filtered acquisition still uses a separate process; bundling does not
-remove that technical requirement. It starts hidden, uses the existing bounded
-IPC, and stops when its SDL reader is destroyed. No service, scheduled task,
-administrator installation, Steam SDK, download or global input change is added.
+The worker is prepared lazily in that directory when needed. It remains a separate
+hidden process for Steam-filtered acquisition; bundling changes installation,
+not that requirement. The SDL reader owns its lifetime. No service, scheduled
+task, administrator installation, SDK download or system input change is added.
+[Input acquisition](INPUT.md#isolated-sdl-reader-under-steam) explains its operation.
 
-Cache files are compared byte-for-byte with the embedded resources before use.
-Missing or damaged files are published atomically under a per-version file lock.
-Verified files remain open against writes/replacement while the runtime uses them.
-New directories are restricted to the current user and SYSTEM, and redirected
-directories/reparse points are rejected. Loading uses an absolute path and system
-dependency search, never a DLL found via PATH or the working directory. Different
-payload hashes coexist, so one game's update cannot overwrite another's reader.
-Runtime-cache repair never modifies the game's binaries. Settings initialization
-and edits write `girolib.ini` separately, beside the library.
+Before use, cache files are compared byte-for-byte with embedded resources.
+Missing/damaged files are published atomically under a per-version lock. Verified
+files stay open against replacement while used. New directories are restricted
+to the current user/SYSTEM; reparse points and redirected directories are rejected.
+Loading uses an absolute path and system dependency search, never PATH or the
+working directory. Different payload hashes coexist.
 
-The absolute local path in `GYROLIB_RUNTIME_CACHE` optionally replaces the cache
-root for portable hosts and tests. It cannot substitute executable contents.
-Changes take effect in a new process. A cache failure leaves the core usable and
-returns an acquisition error; there is no fallback to an unverified DLL.
-The bundled SDL module stays loaded until process exit; destroy all GyroLib
-readers and panels before unloading the mod/library.
+`GYROLIB_RUNTIME_CACHE` can specify another absolute local cache root for portable
+hosts/tests; it cannot substitute executable contents. Changes take effect in a
+new process. A cache failure returns an acquisition error and leaves the core
+usable; there is no fallback to an unverified DLL.
 
-Old cache versions are retained to avoid deleting another game's runtime.
-The GyroLib runtime cache may be removed when all consuming games are closed;
-the next launch recreates the required version. Configuration is stored separately
-and is not removed or migrated by runtime-cache maintenance.
+The bundled SDL module remains loaded until process exit. Destroy readers,
+frontends and contexts before unloading GyroLib; never free borrowed runtime
+handles. Cache repair does not modify game binaries or settings. Old cache
+versions are retained; they may be deleted with all consuming games closed and
+will be recreated as needed.
 
-## Other builds and validation
+## Other builds
 
-`-DGL_SINGLE_DLL=OFF` preserves separate shared libraries and the explicit worker
-path. Static builds and non-Windows targets use that modular arrangement too.
-The single-DLL loader is Windows-specific; it makes no Linux/Proton compatibility
-claim. Existing Linux/core boundaries remain independent of this packaging.
+`GL_SINGLE_DLL=OFF` uses separate libraries and an explicit sensor-worker file.
+Static and non-Windows builds also bypass the Windows resource loader. Modular
+mods whose worker is not beside the host executable must set its absolute path.
+See [build variants](BUILDING.md#build-variants) and [reader lifetime](INPUT.md#protocol-and-lifetime).
 
-`runtime_three_file_distribution` builds a host and mod, stages exactly the three
-files shown above in a path containing spaces and accents, and checks lazy worker
-preparation, actual worker handshake/shutdown, damaged-cache recovery, concurrent
-startup, rejected cache redirects and graceful failures. The separate desktop
-launch test exercises Explorer activation and executable-identity validation.
-Another case preloads a host-owned SDL before the mod and checks independent
-module paths, unchanged host hints and unchanged host subsystem state.
-The settings case calls the public initializer from the mod with a different
-working directory and confirms `girolib.ini` is beside `gyrolib.dll`, retains a
-disabled shortcut and restores saved values after recreating the context.
-The demo and virtual-controller tests use the bundled SDL as well. See
-[validation](VALIDATION.md) for recorded automated and hardware checks, and
-[known limits](LIMITS.md) before declaring a new host/controller combination supported.
+The three-file distribution test covers a host/mod/library layout in a path with
+spaces and accents, cache repair, concurrent startup, worker handshake/shutdown,
+separate host SDL and settings beside the DLL. [Validation](VALIDATION.md) records
+results; [limits](LIMITS.md) identifies untested platforms and environments.
+
+---
+
+Previous: [Menus](MENUS.md)

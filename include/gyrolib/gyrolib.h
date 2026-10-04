@@ -32,9 +32,7 @@ extern "C" {
  * optional. Never apply both callback and returned movement for the same frame.
  */
 #define GL_ABI_VERSION 1u
-#define GL_VERSION_MAJOR 0
-#define GL_VERSION_MINOR 2
-#define GL_VERSION_PATCH 0
+#include "version.h"
 typedef struct gl_context gl_context;
 enum { GL_OK=0, GL_INVALID=-1, GL_UNAVAILABLE=-2, GL_IO_ERROR=-3,
        GL_NEWER_SCHEMA=-4, GL_LIMIT=-5 };
@@ -46,8 +44,8 @@ enum { GL_SPACE_PLAYER=0, GL_SPACE_LOCAL_YAW=1, GL_SPACE_LOCAL_ROLL=2, GL_SPACE_
 enum { GL_FLICK_STYLE_FULL=0, GL_FLICK_STYLE_PIVOT_ONLY=1, GL_FLICK_STYLE_ROTATE_ONLY=2 };
 /* GYRO_OFF stops gyro output, including host enable overrides; orientation and
  * settings are retained and Flick remains independent.
- * ALWAYS ignores activation bindings. HOLD_DISABLE retains the former
- * combined Always-on/hold-to-disable behavior; schema <=6 files migrate.
+ * ALWAYS ignores activation bindings. HOLD_DISABLE suspends gyro while an
+ * activation binding is held.
  * Optional activation.temporary_invert/activation.trackball behaviors reuse
  * those bindings and replace suspension during HOLD_DISABLE's hold only.
  * TOGGLE's live on/off state is shared by all views (including cursor views),
@@ -77,7 +75,7 @@ enum { GL_CONTROL_BUTTONS=1u, GL_CONTROL_TOUCHPADS=2u, GL_CONTROL_STICK_TOUCH=4u
        GL_CONTROL_GRIP_TOUCH=8u, GL_CONTROL_STICKS=16u, GL_CONTROL_TRIGGERS=32u, GL_CONTROL_ALL=63u };
 /* MENU_STATE: host.menu_open is a reliable observation of the game's menus.
  * Withdraw when the hook is unavailable. Required for menus-only calibration. */
-enum { GL_HOST_NATIVE_STICK_SUPPRESSION=1u, GL_HOST_SHORT_PRESS_FILTER=2u,
+enum { GL_HOST_NATIVE_STICK_SUPPRESSION=1u, GL_HOST_LONG_PRESS_BLOCKING=2u,
        GL_HOST_MENU_STATE=4u, GL_HOST_NATIVE_TOUCHPAD_SUPPRESSION=8u };
 /* Button bits use SDL_GamepadButton ordinal 0..31, independent of labels. */
 /* activation.button choices: 0 off, 1..32 the corresponding bit + 1.
@@ -114,6 +112,8 @@ typedef struct gl_trigger_input {
 GL_API int32_t GL_CALL gl_submit_trigger_input(gl_context*,uint64_t endpoint,const gl_trigger_input*);
 GL_API int32_t GL_CALL gl_get_trigger_input(const gl_context*,gl_trigger_input*);
 /* Copied UTF-8 physical labels, e.g. LT/RT or L2/R2. NULL clears the label. */
+/* A changed trigger label emits GL_EVENT_BUTTON_LABELS with detail -1 (refresh
+ * labels) and the endpoint ID. Repeating the same label emits nothing. */
 GL_API int32_t GL_CALL gl_set_trigger_label(gl_context*,uint64_t endpoint,uint32_t side,const char* label);
 GL_API const char* GL_CALL gl_get_trigger_label(const gl_context*,uint32_t side);
 /* Optional additional input, separate from frozen ABI 1 controls. Supply real
@@ -134,7 +134,7 @@ typedef struct gl_sample {
 typedef struct gl_host_state {
     uint32_t aiming, alt_fire; /* reserved legacy fields, ignored; use named contexts */
     uint32_t menu_open, paused, focused, camera_allowed;
-    uint32_t suspend_short_press; /* native interactions requiring hold */
+    uint32_t suspend_long_press_blocking; /* native interactions requiring hold */
     uint32_t steam_gyro_output;   /* 0 unknown, 1 verified disabled, 2 known enabled */
 } gl_host_state;
 typedef struct gl_output {
@@ -172,6 +172,15 @@ typedef struct gl_event {
     double value;
     char setting_id[48];
 } gl_event;
+
+/* Extended notification. The original gl_event layout remains ABI-compatible. */
+typedef struct gl_event_ex {
+    uint32_t type;
+    int32_t detail;
+    uint64_t endpoint_id;
+    double value;
+    char setting_id[128];
+} gl_event_ex;
 typedef void (GL_CALL *gl_camera_callback)(void*,double yaw_degrees,double pitch_degrees);
 /* Optional accepted-sample observer for diagnostics. Invoked synchronously by
  * gl_submit_sample on the context owner thread, after validation, before motion
@@ -181,7 +190,8 @@ typedef void (GL_CALL *gl_camera_callback)(void*,double yaw_degrees,double pitch
 typedef void (GL_CALL *gl_sample_observer)(void*,uint64_t endpoint,const gl_sample*);
 GL_API void GL_CALL gl_set_sample_observer(gl_context*,gl_sample_observer,void*);
 /* Device timestamp seconds -> monotonic seconds, estimated over a stable SDL
- * stream. 1 until qualified; Steam's host-frame clock remains 1. Diagnostics
+ * stream. Initially 1; a previous estimate is retained while requalifying after
+ * wake. Steam's host-frame clock remains 1. Diagnostics
  * only: no user sensitivity multiplier or calibration of Steam Input. */
 GL_API int32_t GL_CALL gl_get_sensor_clock_scale(const gl_context*,uint64_t endpoint,double* scale);
 /* Acquisition diagnostics, not end-to-end camera latency. Report frequency and
@@ -198,7 +208,8 @@ typedef void (GL_CALL *gl_recenter_callback)(void*);
 /* Optional camera action, called after angular deltas on the context owner thread.
  * Center only host camera pitch. Never reset gyro orientation or trigger aiming.
  * NULL withdraws support and hides the button setting. Requests are consumed by
- * the next update and discarded if unfocused/paused/in menus/on a cursor view. */
+ * the next update and discarded if unfocused/paused/on a cursor view or in menus
+ * unless the active camera view explicitly permits camera output there. */
 GL_API void GL_CALL gl_set_recenter_callback(gl_context*,gl_recenter_callback,void*);
 GL_API int32_t GL_CALL gl_request_recenter(gl_context*);
 /* Declare per-view zoom support once, then report actual vertical FOV and its
@@ -220,7 +231,7 @@ enum { GL_ADVANCED_NONE=0, GL_ADVANCED_SMOOTHING=1,
        GL_ADVANCED_ACCELERATION=2, GL_ADVANCED_FLICK=3, GL_ADVANCED_MODIFIERS=4,
        GL_ADVANCED_HOLD_DISABLE=5 };
 GL_API uint32_t GL_CALL gl_setting_advanced_group(const char* setting_id);
-/* Activator families and their inline thresholds/short-press controls. Use to
+/* Activator families and their inline thresholds/long-press blocking controls. Use to
  * group visible rows under a localized Activators heading in native menus. */
 GL_API uint32_t GL_CALL gl_setting_is_activator(const char* setting_id);
 GL_API uint32_t GL_CALL gl_setting_is_advanced(const char* setting_id);
@@ -262,7 +273,38 @@ GL_API int32_t GL_CALL gl_register_gameplay_context(gl_context*,const gl_gamepla
  * Undeclared legacy modes continue to use gl_set_output_target dynamically.
  * Re-registering localized metadata preserves this declaration. */
 GL_API int32_t GL_CALL gl_set_gameplay_context_output_target(gl_context*,uint32_t id,uint32_t target);
+/* Opt a registered camera view into non-pausing game menus. Default false.
+ * Requires GL_HOST_MENU_STATE and camera_allowed on every update; focus, pause,
+ * panel and active-view gates still apply. Enables gyro, flick and recenter,
+ * never long-press blocking filtering of menu commands. Cursor routing is unaffected.
+ * Integration metadata only: not a saved user preference. */
+GL_API int32_t GL_CALL gl_set_gameplay_context_camera_in_menu(gl_context*,uint32_t id,uint32_t allowed);
 GL_API int32_t GL_CALL gl_unregister_gameplay_context(gl_context*,uint32_t id);
+/* Saved single-parent inheritance. Owner thread. First linking a view inherits
+ * all its settings; switching parent keeps explicit overrides. parent=0 freezes
+ * current effective values and detaches. Registered parents only, no cycles.
+ * View metadata, host capabilities and runtime state are never inherited. */
+GL_API int32_t GL_CALL gl_set_context_parent(gl_context*,uint32_t view,uint32_t parent);
+GL_API uint32_t GL_CALL gl_get_context_parent(const gl_context*,uint32_t view);
+GL_API uint32_t GL_CALL gl_can_inherit_context(const gl_context*,uint32_t view,uint32_t parent);
+typedef struct gl_setting_inheritance_info {
+    uint32_t parent_context,source_context,overridden;
+    double parent_value;
+} gl_setting_inheritance_info;
+/* source_context is the actual ancestor providing the value, or this view for
+ * a local setting. parent_context=0 means independent. Strings/IDs stay stable.
+ * gl_setting_set makes a local override even when the number is unchanged. */
+GL_API int32_t GL_CALL gl_setting_inheritance(const gl_context*,const char* setting_id,gl_setting_inheritance_info*);
+GL_API int32_t GL_CALL gl_setting_inherit(gl_context*,const char* setting_id);
+/* Capture the mod author's complete current view settings, inheritance and
+ * automatic-calibration preference BEFORE loading the player's INI. Opt-in;
+ * does not save/apply/change the player's settings. Never call on each frame.
+ * The snapshot belongs to this context, is not persisted, and survives Reset.
+ * Applying restores captured views; other views and language/menu key stay put.
+ * Native menu action: settings.recommended, visible only after capture. */
+GL_API int32_t GL_CALL gl_capture_recommended_settings(gl_context*);
+GL_API uint32_t GL_CALL gl_has_recommended_settings(const gl_context*);
+GL_API int32_t GL_CALL gl_apply_recommended_settings(gl_context*);
 GL_API uint32_t GL_CALL gl_gameplay_context_count(const gl_context*);
 /* Winning observed mode, or 0 when none is active. Zero always suspends output
  * and new filtering, including when no modes are registered. Acquisition,
@@ -271,7 +313,8 @@ GL_API uint32_t GL_CALL gl_gameplay_context_count(const gl_context*);
 GL_API uint32_t GL_CALL gl_get_active_gameplay_context(const gl_context*);
 GL_API int32_t GL_CALL gl_get_gameplay_context(const gl_context*,uint32_t index,gl_gameplay_context*);
 /* Report actual resolved commands before EACH gl_update. Omitted reports become
- * unavailable, not inactive. These observations never change host actions. */
+ * unavailable, not inactive. These observations never change host actions or
+ * prevent editing a registered view's settings. */
 GL_API int32_t GL_CALL gl_set_gameplay_context_state(gl_context*,uint32_t id,uint32_t active,uint32_t available);
 GL_API int32_t GL_CALL gl_register_endpoint(gl_context*,const gl_endpoint*);
 /* Optional UTF-8 name for SDL button ordinal 0..31; copied, nullptr clears it.
@@ -331,8 +374,10 @@ GL_API int32_t GL_CALL gl_submit_controls(gl_context*,uint64_t endpoint,const gl
  * Does not alter the game's command inputs or associate devices by itself. */
 GL_API int32_t GL_CALL gl_set_endpoint_control_authority(gl_context*,uint64_t endpoint,uint32_t families);
 GL_API int32_t GL_CALL gl_submit_flick_input(gl_context*,uint64_t endpoint,const gl_flick_input*);
-/* Selected physical input (SDL first, bound companion first), otherwise legacy
- * controls' right stick. Returns zero availability when stale/unavailable. */
+/* Selected physical input, resolved independently for stick and touchpad
+ * (bound companion first, then SDL), otherwise legacy controls' right stick.
+ * Each family expires independently; timestamp_ns is the newest included
+ * report. Processing retains each family's own clock and backlog. */
 GL_API int32_t GL_CALL gl_get_flick_input(const gl_context*,gl_flick_input*);
 /* Last update's request to suppress native right-touchpad camera output. Hosts
  * must wire this before declaring GL_HOST_NATIVE_TOUCHPAD_SUPPRESSION. */
@@ -347,19 +392,22 @@ typedef struct gl_touchpad_feedback {
 } gl_touchpad_feedback;
 GL_API int32_t GL_CALL gl_get_touchpad_feedback(const gl_context*,gl_touchpad_feedback*);
 /* Mark a button alias for a genuine contact already exposed in caps/controls.
- * The menu omits the duplicate and existing selected aliases migrate to the
- * dedicated family on update. family=NONE clears metadata; side is LEFT/RIGHT/SINGLE.
+ * The menu omits the duplicate; selected aliases resolve to the dedicated family
+ * without rewriting saved bindings. family=NONE clears metadata; side is LEFT/RIGHT/SINGLE.
  * No capability or contact state is invented. ABI 1 structs stay unchanged. */
 GL_API int32_t GL_CALL gl_set_button_contact(gl_context*,uint64_t endpoint,uint32_t button,uint32_t family,uint32_t side);
 GL_API int32_t GL_CALL gl_update(gl_context*,uint64_t now_ns,const gl_host_state*,gl_output*);
 GL_API int32_t GL_CALL gl_get_diagnostics(const gl_context*,gl_diagnostics*);
 GL_API int32_t GL_CALL gl_poll_event(gl_context*,gl_event*); /* 1 event, 0 empty */
+/* Same queue as gl_poll_event: use one polling API per consumer. Legacy polling
+   reports GL_EVENT_CONTEXT/detail=6 (refresh all settings) for IDs over 47 bytes. */
+GL_API int32_t GL_CALL gl_poll_event_ex(gl_context*,gl_event_ex*);
 GL_API int32_t GL_CALL gl_begin_calibration(gl_context*);
 GL_API void GL_CALL gl_cancel_calibration(gl_context*);
 /* Filter only explicitly connected NON-AIM actions. EMIT_TAP means synthesize a
  * press+release of that game action, locally; never inject OS events. key 0..63.
  * eligible identifies an event from the selected button. Only enabled gyro,
- * Hold/Hold-to-disable and activation.short_press=1 can defer it. Physical
+ * Hold/Hold-to-disable and activation.block_long_press=1 can defer it. Physical
  * controls still feed acquisition immediately. Report current views before
  * events; update host safety regularly and pass native_hold for native holds. */
 GL_API int32_t GL_CALL gl_filter_event(gl_context*,uint32_t key,uint32_t event,
@@ -386,7 +434,10 @@ GL_API int32_t GL_CALL gl_menu_shared_setting_at(const gl_context*,uint32_t inde
 /* Stable view tabs: 1 + the host's uint32 mode ID. Zero modes means zero tabs.
  * ID 1 is reserved/retired and never enumerated. Never truncate tab IDs.
  * Labels/descriptions are borrowed under the same lifetime rules as settings.
- * active describes the output profile, not which tab the user is editing. */
+ * active/available describe runtime observation and output selection, not
+ * editability. Every registered view remains configurable while inactive,
+ * unavailable or unreported. Never disable a tab using these flags; respect
+ * each setting/choice's own capability-dependent visible/available metadata. */
 /* Legacy GL_TAB_GENERAL getters alias shared settings; 0 is never enumerated as
  * a tab. GL_TAB_DEFAULT is the legacy name for GL_TAB_CAMERA. */
 enum { GL_TAB_GENERAL=0, GL_TAB_CAMERA=1, GL_TAB_DEFAULT=GL_TAB_CAMERA };
@@ -408,6 +459,12 @@ GL_API int32_t GL_CALL gl_setting_at(const gl_context*,uint32_t index,gl_setting
  * keys and ui.scale return GL_UNAVAILABLE; old metadata slots remain hidden for
  * ABI stability. calibration.automatic remains a shared numeric setting. */
 GL_API int32_t GL_CALL gl_setting_get(const gl_context*,const char* id,double* value);
+/* get returns the inherited preference, independent of the current controller.
+ * get_effective and menu metadata return the capability-adapted runtime value.
+ * Combined inputs fall back to their available member; absent inputs become Off.
+ * This never changes the preference, inheritance overrides or INI. Query after
+ * input polling/update on the owner thread; stale reports count as unavailable. */
+GL_API int32_t GL_CALL gl_setting_get_effective(const gl_context*,const char* id,double* value);
 GL_API int32_t GL_CALL gl_setting_set(gl_context*,const char* id,double value);
 /* Changes auto-save synchronously on the owner thread when a path is configured.
  * Save errors leave the edit applied in memory and are returned by setters/actions.
@@ -431,15 +488,23 @@ GL_API const char* GL_CALL gl_text(const gl_context*,const char* key); /* static
  * settings preserves this host/user preference. No OS hooks or input capture. */
 GL_API int32_t GL_CALL gl_set_menu_key(gl_context*,uint32_t function_number);
 GL_API uint32_t GL_CALL gl_get_menu_key(const gl_context*);
-#define GL_SETTINGS_FILENAME "girolib.ini"
+/* Back + Start (normalized button bits 4 and 6) toggles the supplied panel.
+ * Enabled by default; persisted as ui.gamepad_menu_shortcut=1 (0 disables).
+ * Processed by gl_update with fresh controls from the selected controller and
+ * host.focused, including in menus/while paused. Both buttons must be released
+ * before each chord, including after reconnect/focus loss. No game input is
+ * suppressed. A native-menu host can disable this after loading settings.
+ * Independent of the keyboard shortcut; owner thread, enabled must be 0 or 1. */
+GL_API int32_t GL_CALL gl_set_gamepad_menu_shortcut(gl_context*,uint32_t enabled);
+GL_API uint32_t GL_CALL gl_get_gamepad_menu_shortcut(const gl_context*);
+#define GL_SETTINGS_FILENAME "gyrolib.ini"
 /* Call on the owner thread after registering modes/applying host defaults.
- * Loads or creates girolib.ini in utf8_directory (must already exist). NULL uses
+ * Loads or creates gyrolib.ini in utf8_directory (must already exist). NULL uses
  * the module containing GyroLib: gyrolib.dll/.so, or the mod/exe for static builds.
  * If absent, optionally imports utf8_legacy_path without modifying the old file.
- * An existing destination always wins. Valid older schemas are upgraded/saved.
- * An implicit-only old file needs exactly one declared view to receive its values;
- * otherwise initialization returns GL_UNAVAILABLE without changing the file.
- * Register all current views before migrating pre-schema-6 shared preferences.
+ * An existing destination always wins. Imports must use GL_SETTINGS_SCHEMA too;
+ * discarded development formats are not migrated. Existing files are read-only
+ * until an actual settings edit. Register views before loading their defaults.
  * On failure automatic saving is disabled;
  * report the error and retry initialization after fixing the path/file.
  * Never call from DllMain. No settings I/O is performed by gl_create itself. */
@@ -455,6 +520,11 @@ GL_API int32_t GL_CALL gl_save_settings(gl_context*,const char* utf8_path);
 /* Panel visibility is shared with native menus and automatically gates camera. */
 GL_API void GL_CALL gl_set_panel_open(gl_context*,uint32_t open);
 GL_API uint32_t GL_CALL gl_panel_open(const gl_context*);
+/* Owner-thread query for frontends. Returns a serial incremented on each
+ * closed-to-open transition (zero before the first opening). Optional output:
+ * gameplay context active at that opening, or zero if none. Remains unchanged
+ * while open, so editing another tab is not interrupted by host view changes. */
+GL_API uint64_t GL_CALL gl_get_panel_opening(const gl_context*,uint32_t* gameplay_context);
 #ifdef __cplusplus
 }
 #endif
