@@ -90,6 +90,13 @@ publishes a UI-only snapshot after resolving input. Render callbacks never read
 live fusion state. Detach removes the publication callback. The static frontend
 instead uses the host's ImGui/renderer. See [menus](MENUS.md) and [overlay](OVERLAY.md).
 
+Mouse routing is independent of rendering. `src/mouse_bridge.cpp` owns Windows
+motion correlation, cursor confinement and the thread-safe movement queue. Both
+DX12's existing message callback and the optional SDL window adapter feed it.
+`gl_update` adds its result to the current camera/cursor output. The supplied SDL
+extension filters before mouse state/events, including its buffered raw-input
+thread; it does not replace a host event filter.
+
 ## Packaging
 
 The default Windows DLL combines core/acquisition exports and the optional overlay.

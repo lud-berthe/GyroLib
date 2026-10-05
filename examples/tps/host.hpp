@@ -1,6 +1,7 @@
 #pragma once
 #include <gyrolib/gyrolib.h>
 #include "controller_actions.hpp"
+#include "performance.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -84,6 +85,7 @@ inline double trace_solids(V3 origin,V3 direction,double range=shot_range,double
 // Everything here is the example game's responsibility. GyroLib only observes
 // resolved commands and produces deltas. No SDL/engine types cross its C API.
 struct Host {
+    bool measure_performance{};uint64_t gyro_update_ns{};
     V3 player{};double yaw{},pitch=-2.5,aim_blend{},zoom_degrees=68,walk{},clock{};
     bool inventory{},aiming{},paused{},scope_view{},gyro_menu{};double cursor_x=.5,cursor_y=.5;
     int hovered=-1,equipped=Rifle,sniper_zoom=0;
@@ -189,7 +191,7 @@ struct Host {
             auto& self=*static_cast<Host*>(user);++self.camera_callbacks;self.gyro_yaw_total+=x;
             self.rotate(x,y);
         },this);
-        gl_set_recenter_callback(c,[](void* user){auto& h=*static_cast<Host*>(user);h.pitch=0;h.clear_recoil();},this);
+        gl_set_recenter_step_callback(c,[](void* user,double fraction){auto& h=*static_cast<Host*>(user);h.pitch*=1-fraction;h.clear_recoil();},this);
         if(gl_capture_recommended_settings(c)!=GL_OK)return false; // before the player's INI is loaded
         return true;
     }
@@ -302,7 +304,10 @@ struct Host {
         // The base scope is the sensitivity reference for this view. Report the
         // displayed FOV while scoped; reloading in third person uses no zoom scale.
         if(scoped()&&aiming&&gl_set_gameplay_context_fov(c,AimSniper,fov(),sniper_fovs[0])!=GL_OK)return false;
-        if(gl_update(c,now,&host,&output)!=GL_OK)return false;
+        const auto gyro_begin=measure_performance?performance_clock():0;
+        const auto gyro_result=gl_update(c,now,&host,&output);
+        if(measure_performance)gyro_update_ns=performance_clock()-gyro_begin;
+        if(gyro_result!=GL_OK)return false;
         if(!in.focused||settings||gl_panel_open(c)||paused)return true;
         if(inventory){
             // Processed angular deltas -> normalized local UI coordinates.

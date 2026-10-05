@@ -62,6 +62,79 @@ Both can be disabled by a host that provides a native menu.
 mouse/keyboard/gamepad capture. Continue acquiring controls while open: gamepad
 navigation uses the selected controller's acquired state.
 
+## Steam Input mouse movement
+
+Since 1.2.0, `context.<id>.input.steam_mouse` appears last in each view as soon as
+the Windows bridge is attached and the selected controller is identified through
+Steam Input with a right or single touchpad. No mouse movement is required to
+configure it. SDL supplies this identity from its Steam handle; a generic virtual
+controller or a commercial name does not qualify. A custom acquisition adapter
+can report the same proven metadata with `gl_set_endpoint_steam_input`.
+The native menu model exposes the same setting, choices and visibility.
+
+| Value | Choice | Result |
+|---|---|---|
+| 0 | Pass through | Leave mouse movement to the game |
+| 1 | Block | Suppress mouse movement; keep GyroLib gyro working |
+| 2 | Convert movement | Send movement through the current view output |
+
+Block is the default. **Convert movement** keeps the same label for camera and
+cursor views. It uses the existing output destination declared by the host. The setting saves and inherits
+like other view settings. A view or mode change discards pending old movement.
+
+The existing window bridge must forward `WM_INPUT` and `WM_MOUSEMOVE` even while
+the panel is closed and honor each message's capture result. No new camera hook
+is needed. `gl_overlay_capture` remains the panel-wide capture mask: it does not
+represent individual controller mouse messages. Raw-input cleanup is handled by
+GyroLib for messages it consumes. Independently polled host paths, such as
+DirectInput or GetRawInputBuffer, need an adapter; they do not pass through this
+DX12 window-message callback.
+
+SDL hosts can call `gl_sdl_attach_window(reader, sdl_window)` once. The supplied
+Windows SDL runtime intercepts both window messages and its buffered raw mouse
+stream before updating SDL mouse state or queuing events. It uses the same DLL
+routing code as DX12, with no filtering code in the host. This works independently
+of the renderer or settings frontend, including a non-Steam shortcut. See
+[SDL window input](INPUT.md#optional-sdl-window-input). A native menu alone does
+not attach either input bridge.
+
+Detection correlates at least three relative raw movements without a device
+handle, injected mouse messages and a fresh contact on the selected controller's
+right or single touchpad. It runs in all three modes and while the panel is open.
+Before confirmation, movement passes through. Interception confirmation is
+separate from early menu visibility and is remembered for the current device
+selection, then cleared when it changes or disconnects. It is not saved in the
+INI. Observed controller mouse motion can also expose the option when early
+Steam metadata is unavailable.
+
+The public metadata identifies Steam Input availability, not the complete legacy
+mouse mapping. The setting is therefore offered on compatible Steam-managed
+controllers even if their pad is not currently assigned to mouse. Neither the
+UI nor the first capture needs a movement to set its policy; only interception
+waits for correlated input. See [SDL's Steam handle](https://wiki.libsdl.org/SDL3/SDL_GetGamepadSteamHandle)
+and [Steam's action-based API](https://partner.steamgames.com/doc/api/ISteamInput).
+
+Windows provides no Steam-specific identity on these messages. A device-less
+packet or injected origin alone is insufficient; another injector active during
+pad contact can still match. Ordinary physical mice retain their input. This
+version targets the touchpad-to-mouse mapping tested on Windows, not arbitrary
+controller mappings or Linux/Proton. It is separate from the Steam Input **gyro
+sensor fallback** and never reinterprets mouse deltas as sensor measurements.
+
+Conversion uses 0.05 degrees per count, right-positive yaw and up-positive pitch,
+plus the view's optional FOV compensation. Gyro sensitivity, smoothing and
+calibration do not apply to mouse counts. Touchpad Flick Stick takes priority:
+Block/Convert movement consume the mouse path without adding a second pad rotation.
+The real gyro continues normally. Buttons and wheel packets pass through.
+
+Pause, loss of focus, an unavailable output destination or the library panel
+suspend interception. Camera-enabled game menus follow their view's setting.
+Cursor confinement applies only in gameplay camera views for Block/Convert
+movement. It ends on physical-mouse activity, menus, F10, Alt-Tab and shutdown,
+restoring the previous host restriction only if it has not changed meanwhile.
+The cursor can still move within the game window. A 250 ms physical-mouse
+preference prevents immediate confinement from residual touchpad inertia.
+
 ## Resize and shutdown
 
 Before ResizeBuffers, call `gl_overlay_dx12_before_resize` on the render thread.

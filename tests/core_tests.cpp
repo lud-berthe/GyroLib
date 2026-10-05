@@ -1,6 +1,7 @@
 #include <gyrolib/gyrolib.hpp>
 #include <gyrolib/steam.h>
 #include "../src/detail/projection.hpp"
+#include "../src/detail/panel_devices.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -174,14 +175,16 @@ static void source_selection(){
 }
 static void calibration(){
     const auto buttons=[](gl_context* c,bool pending,bool available){
+        gl_diagnostics diagnostics{};gl_get_diagnostics(c,&diagnostics);
+        const bool local=diagnostics.source!=GL_SOURCE_STEAM;
         CHECK(gl_menu_shared_setting_count(c)==7);
         bool begin=false,cancel=false;
         for(uint32_t i=0;i<gl_menu_shared_setting_count(c);++i){gl_setting_info s{},legacy{};
             CHECK(gl_menu_shared_setting_at(c,i,&s)==GL_OK);
             CHECK(gl_menu_tab_setting_at(c,GL_TAB_GENERAL,i,&legacy)==GL_OK);
             CHECK(std::strcmp(s.id,legacy.id)==0&&s.visible==legacy.visible);
-            if(std::strcmp(s.id,"calibration.begin")==0){begin=true;CHECK(bool(s.visible)==!pending);CHECK(bool(s.available)==(!pending&&available));}
-            if(std::strcmp(s.id,"calibration.cancel")==0){cancel=true;CHECK(bool(s.visible)==pending);CHECK(bool(s.available)==(pending&&available));}
+            if(std::strcmp(s.id,"calibration.begin")==0){begin=true;CHECK(bool(s.visible)==(local&&!pending));CHECK(bool(s.available)==(!pending&&available));}
+            if(std::strcmp(s.id,"calibration.cancel")==0){cancel=true;CHECK(bool(s.visible)==(local&&pending));CHECK(bool(s.available)==(pending&&available));}
         }
         CHECK(begin&&cancel);
     };
@@ -1121,11 +1124,37 @@ static void menu_camera_routing(){
     for(int i=0;i<1200;++i)calibration.tick({0,.5f,0});
     gl_diagnostics d{};gl_get_diagnostics(calibration.c,&d);near(d.bias.y,0);
 }
+static void controller_display_reconnect(){
+    gyrolib::Context context;auto* c=context.get();
+    gl_endpoint steam{};steam.id=1;steam.physical_id=42;steam.connected=1;steam.source=GL_SOURCE_STEAM;
+    std::strcpy(steam.name,"Steam Input controller");CHECK(gl_register_endpoint(c,&steam)==GL_OK);
+    gl_endpoint sdl=steam;sdl.id=2;sdl.source=GL_SOURCE_SDL;std::strcpy(sdl.name,"Controller name from provider");
+    CHECK(gl_register_endpoint(c,&sdl)==GL_OK);
+    auto list=gyrolib_panel_detail::panel_devices(c);CHECK(list.size()==1);CHECK(std::strcmp(list[0].name,sdl.name)==0);
+    CHECK(gl_forget_endpoint(c,sdl.id)==GL_OK);
+    list=gyrolib_panel_detail::panel_devices(c);CHECK(list.size()==1);CHECK(std::strcmp(list[0].name,steam.name)==0);
+    // A live, explicitly paired physical sensor supplies a name when the virtual
+    // device disappears, but cannot rename an unrelated Steam controller.
+    gl_endpoint sensor=sdl;sensor.id=3;sensor.physical_id=84;std::strcpy(sensor.name,"Physical sensor name");
+    CHECK(gl_register_endpoint(c,&sensor)==GL_OK);CHECK(gl_set_motion_companion(c,sensor.id)==GL_OK);
+    list=gyrolib_panel_detail::panel_devices(c);CHECK(std::strcmp(list[0].name,steam.name)==0);
+    CHECK(gl_bind_motion_sensor(c,42,sensor.id)==GL_OK);
+    list=gyrolib_panel_detail::panel_devices(c);CHECK(std::strcmp(list[0].name,sensor.name)==0);
+    CHECK(gl_register_endpoint(c,&sdl)==GL_OK);
+    list=gyrolib_panel_detail::panel_devices(c);CHECK(list.size()==1);CHECK(std::strcmp(list[0].name,sdl.name)==0);
+    // Reverse enumeration order gives the same label, including after renaming.
+    CHECK(gl_forget_endpoint(c,steam.id)==GL_OK);CHECK(gl_register_endpoint(c,&steam)==GL_OK);
+    std::strcpy(sdl.name,"Updated provider name");CHECK(gl_register_endpoint(c,&sdl)==GL_OK);
+    list=gyrolib_panel_detail::panel_devices(c);CHECK(list.size()==1);CHECK(std::strcmp(list[0].name,sdl.name)==0);
+    CHECK(gl_disconnect_endpoint(c,sdl.id)==GL_OK);CHECK(gl_disconnect_endpoint(c,sensor.id)==GL_OK);
+    list=gyrolib_panel_detail::panel_devices(c);CHECK(std::strcmp(list[0].name,steam.name)==0);
+    CHECK(gl_disconnect_endpoint(c,steam.id)==GL_OK);CHECK(gyrolib_panel_detail::panel_devices(c).empty());
+}
 int main(){
     unsigned failures=0;
-    for(auto test:{gamepad_menu_shortcut,temporal,gains_and_spaces,activation,source_selection,calibration,noisy_calibration,flick,block_long_press,settings,gameplay_contexts,context_flick,steam_adapter,gyro_spaces,button_names,sensitivity_range,cursor_routing,profile_persistence,independent_profiles,no_hidden_profile,cursor_profile_metadata,activation_split,shared_toggle,automatic_persistence,motion_companions,automatic_motion_sensor,companion_activators,controller_takeover,touchpad_flick,choice_help,menu_camera_routing}){
+    for(auto test:{controller_display_reconnect,gamepad_menu_shortcut,temporal,gains_and_spaces,activation,source_selection,calibration,noisy_calibration,flick,block_long_press,settings,gameplay_contexts,context_flick,steam_adapter,gyro_spaces,button_names,sensitivity_range,cursor_routing,profile_persistence,independent_profiles,no_hidden_profile,cursor_profile_metadata,activation_split,shared_toggle,automatic_persistence,motion_companions,automatic_motion_sensor,companion_activators,controller_takeover,touchpad_flick,choice_help,menu_camera_routing}){
         try{test();}catch(const std::exception& e){std::cerr<<e.what()<<'\n';++failures;}
     }
     if(failures)return 1;
-    std::cout<<"30 core regression groups passed (synthetic samples; no physical controller validation).\n";return 0;
+    std::cout<<"Core regression groups passed (synthetic samples; no physical controller validation).\n";return 0;
 }

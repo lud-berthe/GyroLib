@@ -29,6 +29,19 @@ typedef struct gl_sdl gl_sdl;
  * handles, releasing borrowed pointers before poll and reacquiring afterward. */
 GL_SDL_API gl_sdl* GL_CALL gl_sdl_create(gl_context*,uint32_t borrowed_subsystem);
 GL_SDL_API void GL_CALL gl_sdl_destroy(gl_sdl*);
+/* Optional window input bridge, independent of rendering. Pass SDL_Window*, or
+ * null to detach. Uses the supplied Windows SDL runtime; GL_UNAVAILABLE for
+ * other SDL builds/platforms. No Steam SDK required, including non-Steam games.
+ * All filtering/conversion and cursor confinement live in GyroLib. Consumed
+ * movement never reaches SDL mouse state or events. Buttons/wheel pass through.
+ * Does not replace the host's SDL event filter or Windows message hook. SDL
+ * owns Raw Input registration while attached, including cursor views. Do not
+ * register a competing mouse Raw Input reader in the same process.
+ * Raw callbacks run on SDL's raw thread; detachment waits for them.
+ * One window per reader and one mouse bridge per context/window (including
+ * DX12 overlay). Detaches on window destruction or reader destruction.
+ * Call on SDL main/context-owner thread. Context must outlive reader. */
+GL_SDL_API int32_t GL_CALL gl_sdl_attach_window(gl_sdl*,void* sdl_window);
 /* For hosts without an SDL event loop: call once before poll, on the SDL main
  * thread. Pumps our SDL instance without consuming the host's queued events.
  * Hosts already pumping this instance should continue their existing loop. */

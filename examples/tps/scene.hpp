@@ -1,6 +1,7 @@
 #pragma once
 #include "host.hpp"
 #include "raster.hpp"
+#include "gpu_scene.hpp"
 #include "scope.hpp"
 #include <SDL3/SDL.h>
 #include <imgui.h>
@@ -21,11 +22,12 @@ struct Projector {
 struct Face {std::array<V3,4> points;ImU32 tint;};
 struct Scene {
     std::vector<Face> faces;
-    Raster raster;
+    Raster raster;GPUScene gpu;std::vector<SceneVertex> mesh;
+    bool gpu_active{},force_cpu{},gpu_failed{};int render_width{},render_height{};
     SDL_Texture* texture{};
     Scene()=default;Scene(const Scene&)=delete;Scene& operator=(const Scene&)=delete;
     ~Scene(){release();}
-    void release(){if(texture){SDL_DestroyTexture(texture);texture=nullptr;}}
+    void release(){gpu.release();gpu_active=false;if(texture){SDL_DestroyTexture(texture);texture=nullptr;}}
     void quad(std::array<V3,4> points,ImU32 tint){faces.push_back({points,tint});}
     void box(V3 base,V3 size,ImU32 tint,double yaw=0){
         std::array<V3,8> p;for(int i=0;i<8;++i){
@@ -57,19 +59,26 @@ struct Scene {
     }
     bool draw(ImDrawList* draw,SDL_Renderer* renderer,const Host& host,ImVec2 size){
         faces.clear();
-        // Bound CPU work in this small demo. UI stays at native viewport/DPI;
-        // only the 3D image is scaled above 1080p, using the same depth buffer.
-        const float render_scale=std::min({1.f,1920.f/std::max(size.x,1.f),1080.f/std::max(size.y,1.f)});
+        // GPU renders at native size; the CPU fallback caps its 3D work at 1080p.
+        const float render_scale=(!force_cpu&&!gpu_failed&&gpu.supported(renderer))?1.f:std::min({1.f,1920.f/std::max(size.x,1.f),1080.f/std::max(size.y,1.f)});
         const int width=std::max(1,int(size.x*render_scale)),height=std::max(1,int(size.y*render_scale));
         Projector camera(host,{float(width),float(height)});
-        if(texture&&(width!=raster.width()||height!=raster.height()))release();
+        if(texture&&(width!=render_width||height!=render_height))release();
         if(!texture){
-            texture=SDL_CreateTexture(renderer,SDL_PIXELFORMAT_RGBA32,SDL_TEXTUREACCESS_STREAMING,width,height);
+            gpu_active=!force_cpu&&!gpu_failed&&gpu.supported(renderer);
+            texture=SDL_CreateTexture(renderer,SDL_PIXELFORMAT_RGBA32,gpu_active?SDL_TEXTUREACCESS_TARGET:SDL_TEXTUREACCESS_STREAMING,width,height);
+            if(gpu_active&&(!texture||!gpu.initialize(renderer,texture,width,height))){
+                release();gpu_failed=true;
+                SDL_Log("Demo GPU scene unavailable; using CPU renderer");
+                return this->draw(draw,renderer,host,size);
+            }
             if(!texture)return false;
+            render_width=width;render_height=height;
             SDL_SetTextureBlendMode(texture,SDL_BLENDMODE_NONE);
             SDL_SetTextureScaleMode(texture,SDL_SCALEMODE_LINEAR);
         }
-        raster.begin(width,height,float(camera.focal),color(17,29,45),color(63,88,101));
+        if(!gpu_active)raster.begin(width,height,float(camera.focal),color(17,29,45),color(63,88,101));
+        mesh.clear();
         for(int z=-14;z<range_end+2;z+=2)for(int x=-18;x<18;x+=2){
             const bool stripe=x==0;const int checker=((x+z)/2)&1;
             quad({V3{double(x),-.02,double(z)},V3{double(x+2),-.02,double(z)},V3{double(x+2),-.02,double(z+2)},V3{double(x),-.02,double(z+2)}},
@@ -185,9 +194,11 @@ struct Scene {
         }
         for(const auto& face:faces){
             const auto a=camera.view(face.points[0]),b=camera.view(face.points[1]),c=camera.view(face.points[2]),d=camera.view(face.points[3]);
-            raster.triangle(a,b,c,face.tint);raster.triangle(a,c,d,face.tint);
+            if(gpu_active){for(auto p:{a,b,c,a,c,d})mesh.push_back({p,face.tint});}
+            else{raster.triangle(a,b,c,face.tint);raster.triangle(a,c,d,face.tint);}
         }
-        if(!SDL_UpdateTexture(texture,nullptr,raster.pixels().data(),width*int(sizeof(uint32_t))))return false;
+        if(gpu_active){if(!gpu.draw(renderer,width,height,float(camera.focal),mesh,color(17,29,45),color(63,88,101)))return false;}
+        else if(!SDL_UpdateTexture(texture,nullptr,raster.pixels().data(),width*int(sizeof(uint32_t))))return false;
         draw->AddImage(ImTextureID(reinterpret_cast<intptr_t>(texture)),{0,0},size);
         if(host.scoped())scope_overlay(draw,size);
         if(!host.inventory&&!host.paused){

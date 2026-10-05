@@ -37,8 +37,10 @@ Renderer, SDL and Steam interfaces have separate headers in the same directory.
 |---|---|
 | [Building and linking](BUILDING.md) | SDK components, source builds and installation checks |
 | [Architecture](ARCHITECTURE.md) | Module responsibilities and data flow |
+| [Demo performance](PERFORMANCE.md) | Repeatable measurements and renderer comparison |
 | [Validation](VALIDATION.md) | Test commands, current results and hardware acceptance |
 | [Versioning](VERSIONING.md) | Library, ABI and INI compatibility rules |
+| [Compatibility and deprecated APIs](COMPATIBILITY.md) | Replacements and migration for existing integrations |
 | [Release notes](RELEASE_NOTES.md) | Published versions, downloads and compatibility |
 | [Licenses and provenance](THIRD_PARTY.md) | Dependencies, local changes and notices to ship |
 | [SDK audit](SDK_AUDIT.md) | Consolidated findings, fixes and historical evidence |

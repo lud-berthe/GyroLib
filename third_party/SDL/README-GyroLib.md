@@ -12,7 +12,7 @@ external SDL development package retain that external dependency.
 
 Rebuild with `tools/build_sdl.ps1`. That script verifies the official source
 archive SHA256 `7322236CD12090C3EB40B9728BE4D49C76F66AD17D04369584D4ECAD5CF77C68`,
-then applies the three retained patches in order:
+then applies the retained patches in order:
 
 1. SDL's upstream [touchpad correction](https://github.com/libsdl-org/SDL/commit/74a746281f2208e07a7680560fcb7ec57565228e),
    which is missing from the stable 3.4 branch: genuine left/right finger contacts
@@ -23,7 +23,14 @@ then applies the three retained patches in order:
 3. Physical-origin metadata for the Triton driver: two sticks and its existing
    genuine stick/grip contacts, plus verified button names.
 
-The last two patches add **descriptive joystick properties**, not packet decoders
+4. A Windows per-window mouse filter for the optional SDL input bridge. It runs
+   before SDL mouse state/events, including buffered Raw Input, and leaves the
+   host's event filter and message hook in place. The callback's property lock
+   synchronizes detachment with SDL's raw-input thread. Attached windows keep SDL
+   Raw Input active for cursor views too; regular SDL mouse delivery still follows
+   SDL's relative-mode state. The private contract is `gyrolib_mouse.h` (MIT).
+
+The two physical-origin patches add **descriptive joystick properties**, not packet decoders
 or controller configuration writes. Their helper is `gyrolib_controls.h` (MIT).
 Both acquisition paths consume the same property contract. GyroLib's processing,
 capability aggregation and menus contain no model-specific topology decisions.

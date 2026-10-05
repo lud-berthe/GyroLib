@@ -57,9 +57,10 @@ int main(int argc,char** argv){
     if(gl_runtime_prepare()!=GL_OK){std::cerr<<gl_runtime_error()<<'\n';return 1;}
 #endif
     SDL_SetMainReady();
+    const char* benchmark=nullptr;bool cpu_scene=false;
     bool smoke=false,capture=false,synthetic=false,four_k=false,cursor_settings=false,occlusion=false,calibration_capture=false,combat_capture=false;
     int preview_weapon=tps::Rifle;bool look_up=false,look_down=false,native_capture=false,french=false;
-    for(int i=1;i<argc;++i){smoke|=std::strcmp(argv[i],"--smoke")==0;capture|=std::strcmp(argv[i],"--capture")==0;
+    for(int i=1;i<argc;++i){if(std::strcmp(argv[i],"--benchmark")==0&&i+1<argc){benchmark=argv[++i];continue;}cpu_scene|=std::strcmp(argv[i],"--cpu-scene")==0;smoke|=std::strcmp(argv[i],"--smoke")==0;capture|=std::strcmp(argv[i],"--capture")==0;
         synthetic|=std::strcmp(argv[i],"--synthetic")==0;four_k|=std::strcmp(argv[i],"--4k")==0;
         cursor_settings|=std::strcmp(argv[i],"--capture-cursor-settings")==0;occlusion|=std::strcmp(argv[i],"--capture-occlusion")==0;
         calibration_capture|=std::strcmp(argv[i],"--capture-calibration")==0;combat_capture|=std::strcmp(argv[i],"--capture-combat")==0;
@@ -68,29 +69,37 @@ int main(int argc,char** argv){
         if(std::strcmp(argv[i],"--capture-pistol")==0){preview_weapon=tps::Pistol;combat_capture=true;}
         if(std::strcmp(argv[i],"--capture-shotgun")==0){preview_weapon=tps::Shotgun;combat_capture=true;}}
     capture|=cursor_settings||occlusion||calibration_capture||combat_capture||look_up||look_down||native_capture;
-    const bool scripted=smoke||capture;synthetic|=scripted;
+    const bool scripted=smoke||capture||benchmark;synthetic|=scripted;
     if(!SDL_Init(SDL_INIT_VIDEO|SDL_INIT_GAMEPAD)){std::cerr<<SDL_GetError();return 1;}
     auto* window=SDL_CreateWindow("GyroLib Demo",four_k?3840:1440,four_k?2160:900,
         SDL_WINDOW_RESIZABLE|SDL_WINDOW_HIGH_PIXEL_DENSITY|(scripted?SDL_WINDOW_HIDDEN:0));
+    // Deferred D3D11 commands preserve SDL's rendering state around the 3D pass.
+    SDL_SetHint(SDL_HINT_RENDER_DIRECT3D_THREADSAFE,"1");
     auto* renderer=window?SDL_CreateRenderer(window,nullptr):nullptr;
     if(!renderer){std::cerr<<SDL_GetError();SDL_Quit();return 1;}
+    if(benchmark)SDL_Log("Demo benchmark renderer: %s",SDL_GetRendererName(renderer));
     SDL_SetWindowMinimumSize(window,1024,720);SDL_SetRenderVSync(renderer,scripted?0:1);
     gyrolib::Context context;tps::Host host;tps::Scene scene;tps::Audio audio;tps::PauseMenu pause_menu;
+    scene.force_cpu=cpu_scene;
     if(!scripted)audio.open();
     if(!context||!host.setup(context.get())){std::cerr<<"Could not create demo contexts\n";return 2;}
     host.equip(preview_weapon);
     if(scripted&&french)gl_set_language(context.get(),"fr");
     if(look_up)host.pitch=80;if(look_down)host.pitch=-80;
     if(occlusion){host.player={-6.85,0,0};host.pitch=-6;host.targets[0].position={-6,.72,8};}
-    DemoInputLog input_log;
+    DemoInputLog input_log;tps::Performance performance;
+    if(benchmark)performance.open(benchmark);
     if(!scripted){
         // Diagnostics use the per-user folder; settings live beside GyroLib.
         const char* pref=SDL_GetPrefPath("GyroLib","TPSDemo");
+        if(pref&&!synthetic)performance.open((std::string(pref)+"performance.csv").c_str());
         if(pref&&!synthetic)input_log.open(context.get(),std::string(pref)+"input-diagnostics.log");
         if(gl_initialize_settings(context.get(),nullptr,nullptr)!=GL_OK){
             host.notification="Could not load or create gyrolib.ini";host.notification_time=8;}
     }
     auto* reader=synthetic?nullptr:gl_sdl_create(context.get(),1);
+    if(reader&&gl_sdl_attach_window(reader,window)!=GL_OK)
+        SDL_Log("GyroLib window input: %s",gl_sdl_error(reader));
     if(!synthetic&&!reader){std::cerr<<SDL_GetError();return 2;}
     if(synthetic){
         gl_endpoint e{};e.id=e.physical_id=simulated_id;e.source=GL_SOURCE_SDL;e.connected=1;
@@ -106,8 +115,15 @@ int main(int argc,char** argv){
     uint64_t previous_time=SDL_GetTicksNS();unsigned frame=0;int result=0;
     double explore_delta=0,aim_delta=0,sniper_delta=0,sniper_zoom_delta=0,inventory_yaw=0,inventory_pitch=0;unsigned inventory_callbacks=0;
     bool saw_inventory=false,saw_selection=false,saw_pistol=false,saw_shotgun=false,saw_pause=false,saw_settings=false,saw_return=false;
+    host.measure_performance=performance.active();
+    uint64_t performance_report=0,last_gpu_sample=0;
     while(running){
-        int w=0,h=0;SDL_GetWindowSize(window,&w,&h);if(scripted)scripted_events(frame,w,h,cursor_settings);
+        const auto frame_start=performance.active()?tps::performance_clock():0;
+        uint64_t stage_start=frame_start;
+        const bool measured=performance.active()&&(!benchmark||frame%120>=20);
+        const auto mark=[&](tps::Performance::Stage stage){if(performance.active()){const auto end=tps::performance_clock();
+            if(measured)performance.add(stage,end-stage_start);stage_start=end;}};
+        int w=0,h=0;SDL_GetWindowSize(window,&w,&h);if(scripted&&!benchmark)scripted_events(frame,w,h,cursor_settings);
         tps::Input input{};input.focused=scripted||(SDL_GetWindowFlags(window)&SDL_WINDOW_INPUT_FOCUS)!=0;
         SDL_Event event{};
         while(SDL_PollEvent(&event)){
@@ -137,9 +153,11 @@ int main(int argc,char** argv){
             }
             if(event.type==SDL_EVENT_MOUSE_WHEEL&&event.wheel.y!=0)input.zoom_press=true;
         }
+        mark(tps::Performance::Events);
         const uint64_t now=scripted?1000000000ull+frame*16666667ull:SDL_GetTicksNS();
         const double dt=scripted?1.0/60:std::clamp((now-previous_time)*1e-9,0.0,.05);previous_time=now;
         demo_ui_gamepad(nullptr);if(reader)gl_sdl_poll(reader,now);
+        mark(tps::Performance::Acquisition);
         auto* pad=reader?demo_selected_pad(context.get(),reader):nullptr;
         input.aim=mouse_aim;input.fire_held=mouse_fire;
         input.move_x=double(keys[SDL_SCANCODE_D])-keys[SDL_SCANCODE_A];input.move_z=double(keys[SDL_SCANCODE_W])-keys[SDL_SCANCODE_S];
@@ -171,7 +189,15 @@ int main(int argc,char** argv){
             const auto to=host.targets[13].position-host.weapon_point({0,.17,.10});
             host.yaw=std::atan2(to.x,to.z)/tps::rad;host.pitch=std::atan2(to.y,std::hypot(to.x,to.z))/tps::rad;
         }
+        if(benchmark){const unsigned part=frame/120;
+            host.yaw=std::sin(frame*.012)*75;host.pitch=part==1?-75:part==2?75:-8;
+            host.inventory=part==4;host.paused=false;input.aim=part==3;
+            host.equip(part==3?tps::Sniper:tps::Rifle);gl_set_panel_open(context.get(),part==5);
+        }
+        stage_start=performance.active()?tps::performance_clock():0;
         if(!host.step(context.get(),now,dt,input)){std::cerr<<"Demo host update failed\n";result=3;break;}
+        mark(tps::Performance::Host);
+        if(measured)performance.add(tps::Performance::Core,host.gyro_update_ns);
         audio.update(host,input.focused&&!host.inventory&&!host.paused&&!gl_panel_open(context.get()));
         if(reader)gl_sdl_apply_feedback(reader);
         input_log.update(context.get(),reader,host.output,now,host);
@@ -201,7 +227,10 @@ int main(int argc,char** argv){
         SDL_SetRenderDrawColor(renderer,11,20,31,255);SDL_RenderClear(renderer);
         ImGui_ImplSDLRenderer3_NewFrame();ImGui_ImplSDL3_NewFrame();ImGui::NewFrame();
         auto* draw=ImGui::GetBackgroundDrawList();
+        stage_start=performance.active()?tps::performance_clock():0;
         if(!scene.draw(draw,renderer,host,io.DisplaySize)){std::cerr<<"Demo rendering failed: "<<SDL_GetError()<<'\n';result=6;ImGui::EndFrame();break;}
+        mark(tps::Performance::Scene);
+        if(scene.gpu.measured_sample()!=last_gpu_sample){if(measured)performance.add(tps::Performance::GPU,scene.gpu.measured_ns());last_gpu_sample=scene.gpu.measured_sample();}
         const auto label=[&](int button,const char* fallback){return pad?gl_get_button_label(context.get(),button):fallback;};
         // Snapshot the selected controller's labels for this frame.
         const std::string inventory_button=label(SDL_GAMEPAD_BUTTON_NORTH,"north button");
@@ -212,6 +241,7 @@ int main(int argc,char** argv){
         pause_menu.draw(context.get(),host,io.DisplaySize,SDL_GetWindowDisplayScale(window),input.focused);
         gl_panel_draw(panel,io.DisplaySize.x,io.DisplaySize.y,SDL_GetWindowDisplayScale(window));
         ImGui::Render();ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(),renderer);
+        mark(tps::Performance::UI);
         if(capture&&(frame==12||frame==28||frame==56||frame==68||frame==69||frame==78||(combat_capture&&frame==38)||(calibration_capture&&frame==82)||(native_capture&&(frame==92||frame==95)))){
             const char* mode=frame==92?"pause":frame==95?"native-menu":frame==12?"exploration":frame==28?"aim-standard":frame==38?"reload":frame==56?"inventory":frame==68?"aim-sniper":frame==69?"aim-sniper-zoom":frame==82?"cancelled":"settings";
             const auto path=std::string(look_up?"demo-look-up-":look_down?"demo-look-down-":preview_weapon==tps::Pistol?"demo-pistol-":preview_weapon==tps::Shotgun?"demo-shotgun-":combat_capture?"demo-combat-":calibration_capture?"demo-calibration-":occlusion?"demo-occlusion-":cursor_settings?"demo-cursor-":"demo-")+mode+(french?"-fr":"")+(four_k?"-4k":"")+".bmp";
@@ -219,7 +249,14 @@ int main(int argc,char** argv){
             if(!surface||!SDL_SaveBMP(surface,path.c_str())){std::cerr<<SDL_GetError();result=5;}
             if(surface)SDL_DestroySurface(surface);
         }
-        SDL_RenderPresent(renderer);++frame;if(scripted){SDL_Delay(1);if(frame>=101)running=false;}
+        stage_start=performance.active()?tps::performance_clock():0;
+        SDL_RenderPresent(renderer);mark(tps::Performance::Present);
+        if(measured)performance.add(tps::Performance::Frame,tps::performance_clock()-frame_start);
+        ++frame;
+        if(benchmark){if(frame%120==0){constexpr const char* names[]={"exploration","floor","ceiling","scope","inventory","settings"};performance.report(names[frame/120-1]);}if(frame>=720)running=false;}
+        else if(scripted){SDL_Delay(1);if(frame>=101)running=false;}
+        else if(performance.active()&&now>=performance_report){performance.report(gl_panel_open(context.get())?"settings":host.inventory?"inventory":host.scoped()?"scope":"gameplay");performance_report=now+2000000000ull;}
+
     }
     if(smoke){
         const bool ratios=std::abs(explore_delta-.5)<.005&&std::abs(aim_delta-.5)<.005&&std::abs(sniper_delta-.2)<.005&&std::abs(sniper_zoom_delta-.0992346)<.001;

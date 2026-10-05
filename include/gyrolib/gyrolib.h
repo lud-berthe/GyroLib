@@ -50,6 +50,9 @@ enum { GL_FLICK_STYLE_FULL=0, GL_FLICK_STYLE_PIVOT_ONLY=1, GL_FLICK_STYLE_ROTATE
  * those bindings and replace suspension during HOLD_DISABLE's hold only.
  * TOGGLE's live on/off state is shared by all views (including cursor views),
  * retained across other activation modes, and starts on for a new context. */
+/* Per-view input.steam_mouse. Interception requires confirmed mouse motion and the
+   Windows overlay or SDL window bridge; physical mouse events pass through. */
+enum { GL_STEAM_MOUSE_PASSTHROUGH=0, GL_STEAM_MOUSE_BLOCK=1, GL_STEAM_MOUSE_CONVERT=2 };
 enum { GL_ALWAYS=0, GL_CONTEXT_ONLY=1, GL_OUTSIDE_CONTEXT=2, GL_HOLD=3, GL_TOGGLE=4, GL_HOLD_DISABLE=5, GL_GYRO_OFF=6 };
 /* Deprecated values retained for loading old files; new profiles reject them. */
 enum { GL_AIM_ONLY=GL_CONTEXT_ONLY, GL_OUTSIDE_AIM=GL_OUTSIDE_CONTEXT };
@@ -204,13 +207,24 @@ typedef struct gl_input_metrics {
     uint32_t gyro_available,gravity_available,clock_qualified;
 } gl_input_metrics;
 GL_API int32_t GL_CALL gl_get_input_metrics(const gl_context*,uint64_t endpoint,gl_input_metrics*);
+/* Deprecated: use gl_recenter_step_callback / gl_set_recenter_step_callback.
+ * Retained for existing binaries; migration is in docs/COMPATIBILITY.md. */
 typedef void (GL_CALL *gl_recenter_callback)(void*);
-/* Optional camera action, called after angular deltas on the context owner thread.
+/* Instant-only camera action, called after angular deltas on the owner thread.
  * Center only host camera pitch. Never reset gyro orientation or trigger aiming.
  * NULL withdraws support and hides the button setting. Requests are consumed by
  * the next update and discarded if unfocused/paused/on a cursor view or in menus
  * unless the active camera view explicitly permits camera output there. */
 GL_API void GL_CALL gl_set_recenter_callback(gl_context*,gl_recenter_callback,void*);
+/* Optional progressive replacement for the instant callback. Each owner-thread
+ * call follows camera deltas and supplies a fraction (0 < fraction <= 1) of the
+ * remaining pitch to remove: pitch += (level_pitch - pitch) * fraction.
+ * GyroLib owns duration/easing; 1 finishes exactly at level. Do not multiply by dt
+ * or sensitivity. Requests restart from the current pitch. Focus/pause/panel,
+ * view/device changes and withdrawing support cancel the pending transition.
+ * Either callback setter replaces the other. Only this one exposes duration. */
+typedef void (GL_CALL *gl_recenter_step_callback)(void*,double fraction);
+GL_API void GL_CALL gl_set_recenter_step_callback(gl_context*,gl_recenter_step_callback,void*);
 GL_API int32_t GL_CALL gl_request_recenter(gl_context*);
 /* Declare per-view zoom support once, then report actual vertical FOV and its
  * unzoomed reference in degrees (0 < FOV < 179) before EVERY update. Missing or
@@ -223,13 +237,13 @@ GL_API int32_t GL_CALL gl_set_gameplay_context_fov(gl_context*,uint32_t id,doubl
  * gl_update. Manual calibration and Steam's calibration are unaffected. */
 GL_API int32_t GL_CALL gl_set_auto_calibration_allowed(gl_context*,uint32_t allowed);
 /* Presentation hints; advanced settings use the same menu/change/persistence
- * API. Place each group beside its main control. Recenter/zoom are ordinary
- * camera rows. Unknown IDs return NONE. No C ABI 1 structs are changed. */
+ * API. Place each group beside its main control. Zoom is an ordinary camera
+ * row. Unknown IDs return NONE. No C ABI 1 structs are changed. */
 /* MODIFIERS is a reserved legacy group. Respect each child's visible flag;
  * Off features have no visible children and no expander. */
 enum { GL_ADVANCED_NONE=0, GL_ADVANCED_SMOOTHING=1,
        GL_ADVANCED_ACCELERATION=2, GL_ADVANCED_FLICK=3, GL_ADVANCED_MODIFIERS=4,
-       GL_ADVANCED_HOLD_DISABLE=5 };
+       GL_ADVANCED_HOLD_DISABLE=5, GL_ADVANCED_RECENTER=6 };
 GL_API uint32_t GL_CALL gl_setting_advanced_group(const char* setting_id);
 /* Activator families and their inline thresholds/long-press blocking controls. Use to
  * group visible rows under a localized Activators heading in native menus. */
@@ -331,6 +345,11 @@ GL_API int32_t GL_CALL gl_get_endpoint(const gl_context*,uint32_t index,gl_endpo
  * at least two increasing sensor timestamps, latest arrival <150 ms old.
  * Queries do not select or bind a device. Useful for native sensor choices. */
 GL_API uint32_t GL_CALL gl_endpoint_motion_available(const gl_context*,uint64_t endpoint);
+/* Acquisition metadata: mark a controller reported by Steam Input. SDL fills
+ * this from its Steam handle; a generic virtual controller is not sufficient.
+ * Used to expose mouse settings before the first mouse movement. No action
+ * mapping is inferred. Zero withdraws the metadata. */
+GL_API int32_t GL_CALL gl_set_endpoint_steam_input(gl_context*,uint64_t endpoint,uint32_t present);
 /* Optional acquisition metadata for automatic companion pairing. Zero vendor
  * disables the hint. Product IDs may differ between USB receivers and virtual
  * pads. A unique virtual controller / companion pair with the same vendor can

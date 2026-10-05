@@ -14,6 +14,9 @@ int main(int argc,char** argv){
     const bool automatic=std::strcmp(argv[2],"auto")==0;
     const bool contacts=std::strncmp(argv[2],"contacts",8)==0;
     const bool flick_stream=std::strcmp(argv[2],"flick-stream")==0;
+    const bool delayed_poll=std::strcmp(argv[2],"delayed-poll")==0;
+    const bool bad_controls=std::strcmp(argv[2],"bad-controls")==0;
+    bool delayed=false;
     // Reproduce environment inherited at process launch, not just SDL's cached
     // environment object (SDL_CreateEnvironment(true) reads the OS environment).
     SDL_setenv_unsafe("SteamAppId","Fixture host untouched",1);
@@ -43,7 +46,11 @@ int main(int argc,char** argv){
     // startup. A slow process launch must not consume the entire data window.
     const auto begin=SDL_GetTicks();Uint64 ready=0;double resumed=0;
     while(SDL_GetTicks()<(ready?ready+(stall?1800:1000):begin+10000)){
-        const auto now=SDL_GetTicksNS();sensor_process_poll(process,now,true);
+        const auto now=SDL_GetTicksNS();
+        // The host timestamps its frame before a hotplug enumeration/Steam
+        // transition stalls the input pump. The worker keeps producing controls.
+        if(delayed_poll&&ready&&!delayed&&SDL_GetTicks()-ready>200){SDL_Delay(85);delayed=true;}
+        sensor_process_poll(process,now,true);
         gl_output output{};update_test_view(c,now,&host,&output);rotation+=std::abs(output.yaw_degrees);
         if(flick_stream){
             gl_flick_input input{};gl_get_flick_input(c,&input);
@@ -73,7 +80,7 @@ int main(int argc,char** argv){
                 last_id=e.id;
             }}
         if(automatic&&!binds&&gl_get_motion_sensor(c,77))++binds;
-        if(!ready&&(last_id||(bad&&*sensor_process_error(process))))ready=SDL_GetTicks();
+        if(!ready&&(last_id||((bad||bad_controls)&&*sensor_process_error(process))))ready=SDL_GetTicks();
         SDL_Delay(1);
     }
     const std::string error=sensor_process_error(process);
@@ -81,9 +88,11 @@ int main(int argc,char** argv){
     const bool stopped=SDL_GetTicks()-closing<1000&&gl_endpoint_count(c)==1;
     bool ok=before_bind&&binds>0&&(live?accepted>50:(stale?accepted==0&&rotation==0:rotation>10));
     if(bad)ok=binds==0&&error.find("protocol")!=std::string::npos;
+    if(bad_controls)ok=error.find("protocol")!=std::string::npos;
     if(std::strcmp(argv[2],"fragment-delayed")==0)ok&=ready&&ready-begin>=2300;
     if(std::strcmp(argv[2],"reconnect")==0)ok&=binds>=2;
     if(stall)ok&=binds==1&&resumed>10; // same endpoint/binding, fresh rotation after re-arm
+    if(delayed_poll)ok&=delayed&&binds==1&&error.empty()&&rotation>30;
     if(contacts)ok&=contact_caps&&labels&&duplicates_hidden&&pad_position&&pad_released&&active_frames>30&&inactive_frames>30&&transitions>=4;
     if(flick_stream){std::printf("flick changes=%u max_gap_ms=%.2f feedback=%d\n",flick_changes,max_flick_gap*1e-6,feedback_delivered);ok&=flick_changes>80&&max_flick_gap<100000000&&feedback_delivered;}
     ok&=stopped&&std::strcmp(SDL_GetEnvironmentVariable(SDL_GetEnvironment(),"SteamAppId"),"Fixture host untouched")==0;

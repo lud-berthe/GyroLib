@@ -38,7 +38,7 @@ is not permission to redistribute arbitrary proprietary game or Steam components
 |---|---|---|
 | GamepadMotionHelpers | v10, Julian “Jibb” Smart | `third_party/GamepadMotion.LICENSE` (MIT) |
 | Gravity initialization extension | GyroLib extension | `third_party/patches/GamepadMotion-gravity-initialization.patch`, root MIT |
-| SDL | Altered Windows x64 3.4.16 build with touchpad backport and physical-origin properties | `third_party/SDL/LICENSE.txt` (zlib), changes in `third_party/patches` |
+| SDL | Altered Windows x64 3.4.16 build with touchpad backport, physical-origin properties and optional window mouse filter | `third_party/SDL/LICENSE.txt` (zlib), changes in `third_party/patches` |
 | HIDAPI in SDL | Vendored with release-3.4.16 | `third_party/SDL/HIDAPI-LICENSE.txt` (BSD-style alternative) |
 | Dear ImGui | 1.92.9b, core and SDL3/SDL renderer/DX12 backends | `third_party/imgui/LICENSE.txt` (MIT) |
 | Embedded fonts / stb | ProggyClean, ProggyForever, stb | `third_party/imgui/FONTS-LICENSE.txt`, `STB-LICENSE.txt` |

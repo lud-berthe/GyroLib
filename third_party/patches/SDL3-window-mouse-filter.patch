@@ -1,0 +1,134 @@
+--- a/src/video/windows/SDL_windowsevents.c
++++ b/src/video/windows/SDL_windowsevents.c
+@@ -23,6 +23,7 @@
+ #ifdef SDL_VIDEO_DRIVER_WINDOWS
+ 
+ #include "SDL_windowsvideo.h"
++#include "gyrolib_mouse.h"
+ #include "../../events/SDL_events_c.h"
+ #include "../../events/SDL_touch_c.h"
+ #include "../../events/scancodes_windows.h"
+@@ -544,6 +545,36 @@
+     return 1;
+ }
+ 
++/* Altered SDL: optional per-window input bridge, before SDL mouse state.
++ * The property lock also makes unregistration wait for in-flight raw callbacks. */
++static bool GyroLibFilterRawMouse(SDL_Window *window, HANDLE device, RAWMOUSE *raw)
++{
++    SDL_PropertiesID props = SDL_GetWindowProperties(window);
++    bool consumed = false;
++    if (SDL_LockProperties(props)) {
++        GyroLibSDLMouseFilter *filter = SDL_GetPointerProperty(props, GL_SDL_MOUSE_FILTER, NULL);
++        if (filter && filter->raw) {
++            consumed = filter->raw(filter->user, (Uint64)(uintptr_t)device,
++                (raw->usFlags & MOUSE_MOVE_ABSOLUTE) != 0, raw->usButtonFlags, raw->lLastX, raw->lLastY);
++        }
++        SDL_UnlockProperties(props);
++    }
++    return consumed;
++}
++static bool GyroLibFilterMessage(SDL_Window *window, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
++{
++    SDL_PropertiesID props = SDL_GetWindowProperties(window);
++    bool consumed = false;
++    if (SDL_LockProperties(props)) {
++        GyroLibSDLMouseFilter *filter = SDL_GetPointerProperty(props, GL_SDL_MOUSE_FILTER, NULL);
++        if (filter && filter->message) {
++            consumed = filter->message(filter->user, hwnd, msg, (Uint64)wp, (Sint64)lp);
++        }
++        SDL_UnlockProperties(props);
++    }
++    return consumed;
++}
++
+ static bool WIN_SwapButtons(HANDLE hDevice)
+ {
+     if (hDevice == NULL) {
+@@ -579,14 +610,13 @@
+     bool isAbsolute = ((rawmouse->usFlags & MOUSE_MOVE_ABSOLUTE) != 0);
+     SDL_MouseID mouseID = (SDL_MouseID)(uintptr_t)hDevice;
+ 
+-    // Check whether relative mode should also receive events from the rawinput stream
+-    if (!data->raw_mouse_enabled) {
+-        return;
+-    }
+-
+     // Relative mouse motion is delivered to the window with keyboard focus
+     SDL_Window *window = SDL_GetKeyboardFocus();
+     if (!window) {
++        return;
++    }
++
++    if (GyroLibFilterRawMouse(window, hDevice, rawmouse) || !data->raw_mouse_enabled) {
+         return;
+     }
+ 
+@@ -1173,6 +1203,10 @@
+ #endif
+     if (!data) {
+         return CallWindowProc(DefWindowProc, hwnd, msg, wParam, lParam);
++    }
++
++    if (GyroLibFilterMessage(data->window, hwnd, msg, wParam, lParam)) {
++        return 0;
+     }
+ 
+ #ifdef WMMSG_DEBUG
+--- a/src/video/windows/SDL_windowswindow.c
++++ b/src/video/windows/SDL_windowswindow.c
+@@ -33,8 +33,19 @@
+ #include "../SDL_sysvideo.h"
+ 
+ #include "SDL_windowsvideo.h"
++#include "gyrolib_mouse.h"
+ #include "SDL_windowskeyboard.h"
+ #include "SDL_windowswindow.h"
++#include "SDL_windowsrawinput.h"
++static bool SDLCALL GyroLibRefreshRawMouse(void)
++{
++    SDL_VideoDevice *device = SDL_GetVideoDevice();
++    if (!device || device->internal->gameinput_context) {
++        return SDL_SetError("GyroLib mouse routing requires SDL Windows Raw Input");
++    }
++    return WIN_SetRawMouseEnabled(device, device->internal->raw_mouse_enabled);
++}
++static GyroLibSDLMouseSupport gyrolib_mouse_support = { GyroLibRefreshRawMouse };
+ 
+ // Dropfile support
+ #include <shellapi.h>
+@@ -423,6 +434,8 @@
+ #endif
+ 
+     window->internal = data;
++    SDL_SetNumberProperty(SDL_GetWindowProperties(window), GL_SDL_MOUSE_VERSION, 1);
++    SDL_SetPointerProperty(SDL_GetWindowProperties(window), GL_SDL_MOUSE_SUPPORT, &gyrolib_mouse_support);
+ 
+     // Set up the window proc function
+     if (window->flags & SDL_WINDOW_EXTERNAL) {
+--- a/src/video/windows/SDL_windowsrawinput.c
++++ b/src/video/windows/SDL_windowsrawinput.c
+@@ -23,6 +23,7 @@
+ #if defined(SDL_VIDEO_DRIVER_WINDOWS)
+ 
+ #include "SDL_windowsvideo.h"
++#include "gyrolib_mouse.h"
+ 
+ #if !defined(SDL_PLATFORM_XBOXONE) && !defined(SDL_PLATFORM_XBOXSERIES)
+ 
+@@ -211,7 +212,14 @@
+ {
+     SDL_VideoData *data = _this->internal;
+     Uint32 flags = 0;
+-    if (data->raw_mouse_enabled) {
++    bool gyro_mouse = false;
++    for (SDL_Window *window = _this->windows; window; window = window->next) {
++        if (SDL_GetPointerProperty(SDL_GetWindowProperties(window), GL_SDL_MOUSE_FILTER, NULL)) {
++            gyro_mouse = true;
++            break;
++        }
++    }
++    if (data->raw_mouse_enabled || gyro_mouse) {
+         flags |= ENABLE_RAW_MOUSE_INPUT;
+     }
+     if (data->raw_keyboard_enabled) {

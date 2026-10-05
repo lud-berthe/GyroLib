@@ -21,6 +21,7 @@ opened. Normal mode accepts late-connected controllers. Mouse, keyboard and
 native sticks work even without a usable gyro source. Synthetic mode does not
 open physical controllers.
 
+- [Steam shortcut and touchpad mouse](#steam-shortcut-and-touchpad-mouse)
 - [Controls](#controls)
 - [Views and recommendations](#views-and-recommendations)
 - [The two settings menus](#the-two-settings-menus)
@@ -28,6 +29,19 @@ open physical controllers.
 - [Camera, scope and combat](#camera-scope-and-combat)
 - [Integration files](#integration-files)
 - [Automated captures and limits](#automated-captures-and-limits)
+
+## Steam shortcut and touchpad mouse
+
+Unreleased: the bundled demo declares its SDL window with
+`gl_sdl_attach_window`. Add `gyrolib_demo.exe` as a non-Steam game and use a Steam
+layout with the touchpad mapped to mouse. For a compatible Steam-managed
+controller, **Steam Input mouse** appears at the end of each view's settings:
+Pass through, Block (default), or Convert movement. Conversion follows that view's
+camera or cursor output. Touchpad Flick Stick takes priority over mouse conversion.
+
+All routing runs inside `gyrolib.dll`; the demo contains no mouse interception
+logic. This SDL path is automatically tested, but the non-Steam shortcut still
+needs a physical-controller check. It is distinct from the Steam Input gyro fallback.
 
 ## Controls
 
@@ -169,7 +183,7 @@ motion and recoil recovery. The demo continues silently if audio is unavailable.
 | `tps/controller_actions.hpp` | Eligible game actions connected to the long-press blocking filter |
 | `sdl_demo_input.hpp` | Selected reader handle for game commands and ImGui navigation |
 | `tps/pause_menu.hpp` | Native settings widgets using public APIs |
-| `tps/scene.hpp`, `raster.hpp`, `ui.hpp` | Scene, depth rendering and inventory |
+| `tps/scene.hpp`, `gpu_scene.hpp`, `raster.hpp`, `ui.hpp` | Scene, depth rendering and inventory |
 | `tps/scope.hpp`, `audio.hpp` | Scope mask/reticle and procedural sounds |
 
 Inventory reports `menu_open=1`, `camera_allowed=0` and a `GL_OUTPUT_CURSOR` view.
@@ -195,8 +209,30 @@ physical controllers. Add `--4k` for 3840×2160; native-menu captures also suppo
 | `--capture-look-up`, `--capture-look-down` | Camera pitch limits |
 
 CTest covers view routing, zoom, reload, recoil, targets, cover, menus and depth.
-The CPU rasterizer uses per-pixel reciprocal depth and near-plane clipping, with
-3D rendering capped at 1920×1080. UI remains native resolution/DPI. Player movement
+On Windows with SDL's D3D11 renderer, the scene uses GPU triangles, a depth buffer
+and native viewport resolution. A deferred command list restores SDL's graphics
+state before drawing the interface. The CPU fallback retains reciprocal depth
+and near-plane clipping, with its 3D image capped at 1920×1080. UI remains native
+resolution/DPI. `--cpu-scene` forces this fallback for comparison. Player movement
 has arena bounds but no crate collision; shots use simple boxes/disks. This is an
 integration demo, not a complete game. [Validation](VALIDATION.md) separates
 software checks from physical-controller observations.
+
+## Performance measurements
+
+Run `gyrolib_demo.exe --benchmark results.csv` for six deterministic scenes,
+or add `--4k` for a 3840×2160 window. Add `--cpu-scene` to compare the CPU fallback.
+Each scene discards 20 warm-up frames and measures 100 frames. Benchmarks use
+synthetic gyro samples, a hidden window and disabled VSync; they do not open
+controllers or load/save player settings.
+
+CSV rows separate event pumping, acquisition, `gl_update`, host logic, scene
+submission, UI and presentation. `scene_gpu` uses asynchronous D3D11 timestamps;
+queries are read without waiting or flushing. Host time includes `gl_update`.
+CPU and GPU work overlap: these columns must not be summed into an FPS estimate.
+
+Interactive launches also write a bounded `performance.csv` beside
+`input-diagnostics.log` in the per-user demo folder. It records mean, p95, p99 and
+maximum times every two seconds, for at most 20 minutes. This path includes the
+actual SDL reader and Windows mouse bridge. Hidden synthetic benchmarks do not
+validate real-controller latency or Steam behavior. See [measured results](PERFORMANCE.md).

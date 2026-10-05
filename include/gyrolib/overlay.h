@@ -68,7 +68,10 @@ GL_API int32_t GL_CALL gl_overlay_dx12_shutdown(gl_overlay*);
  * required. Return capture bits (NOT an LRESULT): host decides what to suppress.
  * Always preserve lifecycle/focus messages and unrelated game actions.
  * Relative/raw mouse and gamepad gameplay must also respect capture(), even if
- * not delivered through this function. No synthetic OS input is emitted. */
+ * not delivered through this function. Forward WM_INPUT/WM_MOUSEMOVE even when
+ * closed: a detected Steam mouse message can return CAPTURE_MOUSE independently
+ * of the panel-wide capture(). GyroLib performs DefWindowProc raw cleanup for
+ * consumed WM_INPUT. No synthetic OS input is emitted. */
 GL_API uint32_t GL_CALL gl_overlay_win32_message(gl_overlay*,void* window,
     uint32_t message,uint64_t wparam,int64_t lparam);
 /* Thread-local diagnostic string, valid until next diagnostic on this thread. */

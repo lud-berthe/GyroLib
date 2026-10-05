@@ -102,7 +102,7 @@
   "mode.hold": "Segurar para ativar",
   "mode.toggle": "Alternar",
   "calibration.action": "Recalibrar giroscópio",
-  "calibration.steamHelp": "Calibre nas configurações de controle do Steam.",
+  "calibration.steamHelp": "A calibração é gerenciada pelo Steam Input.",
   "BlockLongPress": "BLOQUEAR AO SEGURAR",
   "ui.block_long_press": "Bloquear ao segurar",
   "description.BlockLongPress": "Um toque curto ativa a ação do jogo ao soltar. Segurar controla apenas o giroscópio.",
@@ -317,5 +317,16 @@
   "inherit.view": "Visão",
   "inherit.help": "Use as configurações de outra visão.",
   "recommended": "Usar configurações recomendadas",
-  "description.recommended": "Aplique as configurações recomendadas por este mod."
+  "description.recommended": "Aplique as configurações recomendadas por este mod.",
+  "RecenterDuration": "DURAÇÃO DA CENTRALIZAÇÃO",
+  "description.RecenterDuration": "Tempo para retornar a câmera à posição horizontal. Zero é instantâneo.",
+  "ui.advanced.recenter": "Opções de centralização.",
+  "SteamMouse": "RATO DO STEAM INPUT",
+  "description.SteamMouse": "Escolhe como usar os movimentos do rato do Steam Input.",
+  "steam_mouse.pass": "Deixar passar",
+  "steam_mouse.block": "Bloquear",
+  "choice.steam_mouse.pass": "Deixar o jogo processar os movimentos do rato.",
+  "choice.steam_mouse.block": "Ignorar os movimentos do rato.",
+  "steam_mouse.convert": "Converter movimento",
+  "choice.steam_mouse.convert": "Usar os movimentos do rato para controlar a vista."
 }

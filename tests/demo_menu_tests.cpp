@@ -64,11 +64,12 @@ int main(int argc,char** argv){
         gl_setting_set(c.get(),"context.101.gyro.fast_sensitivity_x",8);
         gl_setting_set(c.get(),"context.101.flick.mode",GL_FLICK_ON);
         gl_setting_set(c.get(),"context.101.flick.snap",2);
-        const char* parents[]={"context.101.gyro.smoothing_ms","context.101.gyro.acceleration","context.101.flick.mode","context.101.gyro.activation"};
+        gl_setting_set(c.get(),"context.101.camera.recenter_button",9);
+        const char* parents[]={"context.101.gyro.smoothing_ms","context.101.gyro.acceleration","context.101.flick.mode","context.101.gyro.activation","context.101.camera.recenter_button"};
         gl_setting_set(c.get(),"context.101.gyro.activation",GL_HOLD_DISABLE);
         gl_setting_set(c.get(),"context.101.activation.temporary_invert",1);
         gl_setting_set(c.get(),"context.101.activation.trackball",1);
-        for(int size=0;size<2;++size)for(const char* language:{"en","fr","de","es","it","pt"})for(int group=0;group<4;++group){
+        for(int size=0;size<2;++size)for(const char* language:{"en","fr","de","es","it","pt"})for(int group=0;group<5;++group){
             io.DisplaySize=size?ImVec2(3840,2160):ImVec2(1024,720);
             SDL_SetWindowSize(window,int(io.DisplaySize.x),int(io.DisplaySize.y));
             gl_set_language(c.get(),language);frame(native);
@@ -279,6 +280,16 @@ int main(int argc,char** argv){
         host.gyro_menu=false;host.paused=false;frame(native);host.paused=true;frame(native);frame(native);
         key(ImGuiKey_GamepadDpadDown,native);key(ImGuiKey_GamepadFaceDown,native);frame(native);
         require(host.gyro_menu&&host.paused,"gamepad must navigate from pause to gyro settings");
+        require(gl_forget_endpoint(c.get(),1)==GL_OK,"forget synthetic SDL controller");
+        e.source=GL_SOURCE_STEAM;require(gl_register_endpoint(c.get(),&e)==GL_OK,"register synthetic Steam controller");
+        for(int i=0;i<40;++i)frame(native);
+        gl_diagnostics diagnostics{};gl_get_diagnostics(c.get(),&diagnostics);
+        require(diagnostics.source==GL_SOURCE_STEAM,"Steam motion source did not qualify");
+        for(const char* language:{"en","fr","de","es","it","pt"}){
+            gl_set_language(c.get(),language);frame(native);frame(native);
+            auto* w=ImGui::FindWindowByName("Pause###DemoPause");
+            require(w&&w->ScrollMax.y==0&&w->ScrollMax.x==0,"native Steam calibration message exceeded the footer");
+        }
         std::cout<<"Native menu: keyboard/gamepad navigation, mouse/keyboard/gamepad edits, metadata, persistence and EN/FR bounds passed\n";
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';result=3;}
     std::error_code error;std::filesystem::remove(path,error);

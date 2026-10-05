@@ -6,6 +6,8 @@
 #include "detail/sensor_watchdog.hpp"
 #include "detail/touchpad_haptic.hpp"
 #include <SDL3/SDL.h>
+#include "detail/mouse_bridge.hpp"
+#include "../third_party/SDL/gyrolib_mouse.h"
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
@@ -40,6 +42,11 @@ struct gl_sdl {
     gl_context* context{};bool owned{};uint64_t enumerated{};
     uint64_t feedback_update{},feedback_last{};
     SensorProcess* sensor_process{};
+    SDL_Window* mouse_window{};
+    gyrolib_detail::MouseBridge* mouse_bridge{};
+    GyroLibSDLMouseFilter mouse_filter{};
+    GyroLibSDLMouseSupport* mouse_support{};
+    bool mouse_refresh_pending{};
     std::atomic<bool> devices_changed{true};
     std::vector<Pad> pads;
     std::mutex mutex;
@@ -89,17 +96,65 @@ gl_sdl* GL_CALL gl_sdl_create(gl_context* c,uint32_t borrowed) try {
 }catch(const std::bad_alloc&){return creation_failed("Cannot allocate SDL reader");}
 catch(...){return creation_failed("Cannot create SDL reader");}
 void GL_CALL gl_sdl_destroy(gl_sdl* self) {
-    if(!self)return;SDL_RemoveEventWatch(gl_sdl::watch,self);
+    if(!self)return;gl_sdl_attach_window(self,nullptr);SDL_RemoveEventWatch(gl_sdl::watch,self);
     for(auto& p:self->pads)self->close(p);
     sensor_process_destroy(self->sensor_process);
     if(self->owned)SDL_QuitSubSystem(SDL_INIT_GAMEPAD);delete self;
 }
+int32_t GL_CALL gl_sdl_attach_window(gl_sdl* self,void* window) try {
+    if(!self||!SDL_IsMainThread())return GL_INVALID;
+    auto* next=static_cast<SDL_Window*>(window);
+    if(next&&next==self->mouse_window)return GL_OK;
+    if(next){
+        const auto props=SDL_GetWindowProperties(next);
+        if(SDL_GetNumberProperty(props,GL_SDL_MOUSE_VERSION,0)!=1){
+            self->error="Window mouse routing requires GyroLib's Windows SDL runtime";return GL_UNAVAILABLE;}
+        if(SDL_GetPointerProperty(props,GL_SDL_MOUSE_FILTER,nullptr)){
+            self->error="Window already has a mouse input bridge";return GL_UNAVAILABLE;}
+    }
+    if(self->mouse_window)SDL_ClearProperty(SDL_GetWindowProperties(self->mouse_window),GL_SDL_MOUSE_FILTER);
+    gyrolib_detail::mouse_bridge_destroy(self->mouse_bridge);self->mouse_bridge=nullptr;
+    if(self->mouse_support){self->mouse_support->refresh();self->mouse_refresh_pending=false;self->mouse_support=nullptr;}
+    if(!next)return GL_OK;
+    self->mouse_bridge=gyrolib_detail::mouse_bridge_create(self->context);
+    if(!self->mouse_bridge){self->error="Context already has a mouse bridge or allocation failed";return GL_UNAVAILABLE;}
+    self->mouse_filter.user=self;
+    self->mouse_filter.raw=[](void* user,Uint64 device,bool absolute,Uint16 buttons,Sint32 x,Sint32 y){
+        auto* reader=static_cast<gl_sdl*>(user);
+        return gyrolib_detail::mouse_bridge_raw(reader->mouse_bridge,device,absolute,buttons,x,y);
+    };
+    self->mouse_filter.message=[](void* user,void* hwnd,Uint32 message,Uint64 wp,Sint64 lp){
+        auto* reader=static_cast<gl_sdl*>(user);
+        // SDL's buffered raw-input callback owns packet consumption. Do not
+        // consume WM_INPUT here or SDL would lose/duplicate buffered packets.
+        return gyrolib_detail::mouse_bridge_message(reader->mouse_bridge,hwnd,message,wp,lp,false);
+    };
+    const auto props=SDL_GetWindowProperties(next);
+    self->mouse_window=next;
+    auto cleanup=[](void* user,void*){
+        auto* reader=static_cast<gl_sdl*>(user);reader->mouse_window=nullptr;reader->mouse_refresh_pending=true;
+        gyrolib_detail::mouse_bridge_window(reader->mouse_bridge,nullptr);
+    };
+    if(!SDL_SetPointerPropertyWithCleanup(props,GL_SDL_MOUSE_FILTER,&self->mouse_filter,cleanup,self)){
+        self->mouse_window=nullptr;gyrolib_detail::mouse_bridge_destroy(self->mouse_bridge);self->mouse_bridge=nullptr;
+        self->error=SDL_GetError();return GL_IO_ERROR;
+    }
+    gyrolib_detail::mouse_bridge_window(self->mouse_bridge,SDL_GetPointerProperty(props,SDL_PROP_WINDOW_WIN32_HWND_POINTER,nullptr));
+    self->mouse_support=static_cast<GyroLibSDLMouseSupport*>(SDL_GetPointerProperty(props,GL_SDL_MOUSE_SUPPORT,nullptr));
+    if(!self->mouse_support||!self->mouse_support->refresh()){
+        self->error=SDL_GetError();gl_sdl_attach_window(self,nullptr);return GL_UNAVAILABLE;
+    }
+    self->error.clear();return GL_OK;
+}catch(...){return GL_LIMIT;}
 int32_t GL_CALL gl_sdl_pump_events(gl_sdl* self){
     if(!self||!SDL_IsMainThread())return GL_INVALID;
     SDL_PumpEvents();return GL_OK;
 }
 int32_t GL_CALL gl_sdl_poll(gl_sdl* self,uint64_t now) try {
     if(!self||!now||!SDL_IsMainThread())return GL_INVALID;
+    if(self->mouse_refresh_pending&&self->mouse_support){
+        self->mouse_support->refresh();self->mouse_refresh_pending=false;
+    }
     SDL_UpdateGamepads();
     for(auto i=self->pads.begin();i!=self->pads.end();) {
         if(!SDL_GamepadConnected(i->handle)){self->close(*i);i=self->pads.erase(i);self->enumerated=0;}
@@ -170,6 +225,7 @@ int32_t GL_CALL gl_sdl_poll(gl_sdl* self,uint64_t now) try {
                     layout.stick[b]?GL_CONTACT_STICK:layout.grip[b]?GL_CONTACT_GRIP:GL_CONTACT_NONE,layout.stick[b]|layout.grip[b]);
             }
             gl_set_endpoint_control_authority(self->context,p.info.id,layout.authority|((layout.caps.gyro&&!steam)?GL_CONTROL_TRIGGERS:0));
+            gl_set_endpoint_steam_input(self->context,p.info.id,p.steam!=0);
             gl_set_endpoint_pairing_hint(self->context,p.info.id,SDL_GetGamepadVendor(p.handle),SDL_GetGamepadProduct(p.handle),p.steam!=0);
             for(int side=0;side<2;++side)gl_set_trigger_label(self->context,p.info.id,side?GL_RIGHT:GL_LEFT,layout.trigger_labels[side]);
         }

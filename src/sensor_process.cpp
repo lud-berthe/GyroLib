@@ -2,6 +2,7 @@
 #include "detail/sensor_wire.hpp"
 #include "detail/runtime.hpp"
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <map>
@@ -27,6 +28,7 @@ static size_t pipe_read(SDL_IOStream* io,void* buffer,size_t size){
 struct SensorProcess {
     gl_context* context{};SDL_Process* child{};std::string path,error;
     std::map<uint64_t,uint64_t> endpoints;
+    std::map<uint64_t,uint64_t> control_times;
     std::array<unsigned char,sizeof(Record)> partial{};size_t used{};
     uint64_t retry{},last_message{},next_id=1;bool hello{};
     int feedback_result=GL_UNAVAILABLE;
@@ -54,7 +56,7 @@ static size_t read_output(SensorProcess* p,void* data,size_t size){
     return pipe_read(SDL_GetProcessOutput(p->child),data,size);
 }
 static void stop(SensorProcess* p){
-    for(auto [remote,id]:p->endpoints){gl_disconnect_endpoint(p->context,id);gl_forget_endpoint(p->context,id);}p->endpoints.clear();
+    for(auto [remote,id]:p->endpoints){gl_disconnect_endpoint(p->context,id);gl_forget_endpoint(p->context,id);}p->endpoints.clear();p->control_times.clear();
     if(p->child){
         const Command quit{.kind=Quit};auto* input=SDL_GetProcessInput(p->child);
 #ifdef _WIN32
@@ -152,7 +154,7 @@ static bool receive(SensorProcess* p,const Record& r,uint64_t now){
         else if(p->error=="Right-touchpad feedback unavailable or write failed")p->error.clear();
         return true;
     }
-    if(r.kind==Removed){gl_disconnect_endpoint(p->context,i->second);gl_forget_endpoint(p->context,i->second);p->endpoints.erase(i);return true;}
+    if(r.kind==Removed){gl_disconnect_endpoint(p->context,i->second);gl_forget_endpoint(p->context,i->second);p->control_times.erase(r.endpoint);p->endpoints.erase(i);return true;}
     if(r.kind==ButtonLabel){
         if(r.hardware>=32||!std::memchr(r.name,0,sizeof(r.name)))return false;
         if(gl_set_button_contact(p->context,i->second,r.hardware,static_cast<uint32_t>(r.sensor_ns),static_cast<uint32_t>(r.sensor_ns>>32))!=GL_OK)return false;
@@ -170,11 +172,23 @@ static bool receive(SensorProcess* p,const Record& r,uint64_t now){
     }
     const auto current=clock_ns();if(!fresh(r.observed_ns,current)||current-r.observed_ns>=now)return true;
     if(r.kind==Controls){
+        // A late host frame can map a valid report behind the last accepted
+        // controls timestamp. Drop that report as a unit, not the whole reader.
+        // Still reject malformed payloads independently of their timestamp.
+        for(float v:{r.controls.left_x,r.controls.left_y,r.controls.right_x,r.controls.right_y,
+            r.flick.stick_x,r.flick.stick_y,r.flick.touchpad_x,r.flick.touchpad_y})
+            if(!std::isfinite(v)||std::abs(v)>1)return false;
+        if((r.flick.available&~3u)||r.flick.touching>1||(r.triggers.available&~3u))return false;
+        for(float v:{r.triggers.left,r.triggers.right})if(!std::isfinite(v)||v<0||v>1)return false;
         auto controls=r.controls;controls.timestamp_ns=now-(current-r.observed_ns);
+        auto& last=p->control_times[r.endpoint];
+        if(controls.timestamp_ns<last)return true;
         auto flick=r.flick;flick.timestamp_ns=controls.timestamp_ns;
         auto triggers=r.triggers;triggers.timestamp_ns=controls.timestamp_ns;
-        return gl_submit_controls(p->context,i->second,&controls)==GL_OK&&gl_submit_flick_input(p->context,i->second,&flick)==GL_OK&&
+        const bool valid=gl_submit_controls(p->context,i->second,&controls)==GL_OK&&gl_submit_flick_input(p->context,i->second,&flick)==GL_OK&&
             gl_submit_trigger_input(p->context,i->second,&triggers)==GL_OK;
+        if(valid)last=controls.timestamp_ns;
+        return valid;
     }
     const gl_sample sample{r.sensor_ns,now-(current-r.observed_ns),r.gyro,r.accel};
     gl_submit_sample(p->context,i->second,&sample);return true;

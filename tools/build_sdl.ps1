@@ -15,7 +15,7 @@ if(!(Test-Path -LiteralPath (Join-Path $gyroSource 'CMakeLists.txt'))){
     tar -xf $gyroArchive -C $gyroSourceParent
     if($LASTEXITCODE){throw 'SDL extraction failed'}
 }
-$gyroPatches=@('SDL3-steam-touchpads-upstream.patch','SDL_hidapi_steam.c.origins.patch','SDL_hidapi_steam_triton.c.origins.patch')
+$gyroPatches=@('SDL3-steam-touchpads-upstream.patch','SDL_hidapi_steam.c.origins.patch','SDL_hidapi_steam_triton.c.origins.patch','SDL3-window-mouse-filter.patch')
 function Test-GyroPatch([string]$Patch, [switch]$Reverse){
     # Windows PowerShell reports a nonzero native stderr as a terminating error
     # under Stop; a failed probe is expected when the patch is already applied.
@@ -35,6 +35,7 @@ try {
         }
     }
     Copy-Item -LiteralPath (Join-Path $gyroProject 'third_party/SDL/gyrolib_controls.h') -Destination 'src/joystick/hidapi/gyrolib_controls.h'
+    Copy-Item -LiteralPath (Join-Path $gyroProject 'third_party/SDL/gyrolib_mouse.h') -Destination 'src/video/windows/gyrolib_mouse.h'
 } finally {Pop-Location}
 # Normalize duplicate Path/PATH supplied by some Windows launchers.
 $gyroBuildPath=$env:PATH

@@ -2,6 +2,36 @@
 
 [Documentation](INDEX.md) / Maintenance
 
+## 1.2.0 — 5 October 2026
+
+- **Steam touchpad mouse per view:** pass movement through, block it, or convert
+  it to camera/cursor output alongside GyroLib gyro. Block is the default.
+  The option appears when a supported Windows bridge and controller metadata
+  are available; filtering starts after movement-source confirmation. Physical
+  mouse input passes through. The supplied SDL window bridge also supports
+  non-Steam shortcuts. See [setup and detection limits](OVERLAY.md#steam-input-mouse-movement).
+- **Progressive recentering:** an advanced duration setting, defaulting to 0 ms,
+  uses the new `gl_set_recenter_step_callback`. The original instant callback
+  remains supported; adopting the duration requires registering the new callback.
+- **Source recovery:** improve isolated SDL reader recovery and device metadata
+  when Steam Input is enabled or disabled during a session.
+- **Calibration panel:** when Steam Input supplies motion, show an explanation
+  in place of calibration controls. GyroLib does not recalibrate Steam data.
+- **Faster demo rendering:** the Windows D3D11 renderer moves triangle and depth
+  rendering onto the GPU, supports native 4K and retains a CPU fallback.
+  Repeated exploration benchmarks reduce scene CPU time from 6.65 to 0.38 ms.
+  A controller session through Steam confirmed improved fluidity; see
+  [measurements and their limits](PERFORMANCE.md).
+
+Existing 1.x integrations and settings remain compatible: C/overlay ABI 1 and
+INI schema 0.2.0 are unchanged. Keep `gyrolib.ini` when replacing the DLL.
+New functions require the 1.2.0 DLL and matching SDK headers. Mouse conversion
+requires a supported window-input integration; it is not a global mouse hook.
+
+Downloads: [1.2.0 release](https://github.com/lud-berthe/GyroLib/releases/tag/v1.2.0)
+contains the standalone DLL, SDK, demo and SHA-256 checksums. Windows x64 binaries
+require the Microsoft Visual C++ x64 runtime. Linux and Proton remain unvalidated.
+
 ## 1.1.0 — 5 October 2026
 
 The DLL-owned DX12 settings panel now supports SDR 10-bit, scRGB and HDR10

@@ -8,6 +8,7 @@
 #include <vector>
 #include "detail/panel_help.hpp"
 #include "detail/panel_commands.hpp"
+#include "detail/panel_devices.hpp"
 #include "detail/inheritance_widgets.hpp"
 using gyrolib_panel_detail::help;
 struct gl_panel {gl_context* context;int result{};uint64_t selected_tab=GL_TAB_DEFAULT;bool select_tab=true;
@@ -45,6 +46,7 @@ static uint32_t control_group(const char* key,double value){
     if(!std::strcmp(key,"gyro.smoothing_ms")&&value>0)return GL_ADVANCED_SMOOTHING;
     if(!std::strcmp(key,"gyro.acceleration")&&value>0)return GL_ADVANCED_ACCELERATION;
     if(!std::strcmp(key,"flick.mode")&&int(value)!=GL_FLICK_OFF)return GL_ADVANCED_FLICK;
+    if(!std::strcmp(key,"camera.recenter_button")&&value>0)return GL_ADVANCED_RECENTER;
     return GL_ADVANCED_NONE;
 }
 static void draw_action(gl_panel* p,const gl_setting_info& action,float width=0,bool secondary=false){
@@ -135,10 +137,10 @@ void GL_CALL gl_panel_draw(gl_panel* p,float width,float height,float dpi) try {
         p->opening=opening;p->selected_tab=uint64_t(opening_context)+1;p->select_tab=true;
     }
     // Complete allocating operations before opening ImGui scopes.
-    std::vector<gl_endpoint> devices,sensors;
+    auto devices=gyrolib_panel_detail::panel_devices(c);
+    std::vector<gl_endpoint> sensors;
     for(uint32_t i=0;i<gl_endpoint_count(c);++i){gl_endpoint e{};gl_get_endpoint(c,i,&e);
-        if(gl_is_motion_companion(c,e.id)){if(e.connected)sensors.push_back(e);continue;}
-        if(e.connected&&std::none_of(devices.begin(),devices.end(),[&](const auto& d){return d.physical_id==e.physical_id;}))devices.push_back(e);}
+        if(gl_is_motion_companion(c,e.id)&&e.connected)sensors.push_back(e);}
     float scale=std::max({1.f,dpi,height/1080.f});
     scale=std::clamp(scale,0.75f,std::max(.75f,std::min(3.f,height/760.f)));
     ImGui::SetNextWindowPos(ImVec2(width*.5f,height*.5f),ImGuiCond_Always,ImVec2(.5f,.5f));
@@ -193,9 +195,10 @@ void GL_CALL gl_panel_draw(gl_panel* p,float width,float height,float dpi) try {
         }
         const float content_width=ImGui::GetContentRegionAvail().x,gap=ImGui::GetStyle().ItemSpacing.x;
         const float padding=2*ImGui::GetStyle().FramePadding.x;
+        const bool steam_calibration=diagnostic.source==GL_SOURCE_STEAM;
         const float calibration_label=ImGui::CalcTextSize(gl_text(c,"ui.auto_calibration")).x;
-        const float calibrate_width=ImGui::CalcTextSize(calibrate.label).x+padding;
-        const bool label_above=calibration_label+150*scale+calibrate_width+2*gap>content_width;
+        const float calibrate_width=ImGui::CalcTextSize(calibrate.label?calibrate.label:"").x+padding;
+        const bool label_above=!steam_calibration&&calibration_label+150*scale+calibrate_width+2*gap>content_width;
         const float combo_width=content_width-calibrate_width-gap-(label_above?0:calibration_label+gap);
         const float half_width=(content_width-gap)*.5f;
         const bool stack_actions=recommended.visible&&std::max(ImGui::CalcTextSize(reset.label).x,
@@ -207,7 +210,7 @@ void GL_CALL gl_panel_draw(gl_panel* p,float width,float height,float dpi) try {
             case GL_CAL_COLLECTING:std::snprintf(status,sizeof(status),"%s",gl_text(c,"calibration.collecting"));break;
             case GL_CAL_MOVING:std::snprintf(status,sizeof(status),"%s",gl_text(c,"calibration.moving"));break;
             case GL_CAL_COMPLETE:std::snprintf(status,sizeof(status),"%s",gl_text(c,"calibration.complete"));break;
-            case GL_CAL_EXTERNAL:std::snprintf(status,sizeof(status),"%s",gl_text(c,"calibration.steamHelp"));break;
+            case GL_CAL_EXTERNAL:break; // shown in place of the calibration controls
             default:break;
         }
         const auto save_result=gl_get_settings_save_result(c);
@@ -215,7 +218,10 @@ void GL_CALL gl_panel_draw(gl_panel* p,float width,float height,float dpi) try {
             std::snprintf(error,sizeof(error),"%s (%d)",gl_text(c,"ui.save_failed"),save_result);
         else if(p->result!=GL_OK&&p->result!=save_result)
             std::snprintf(error,sizeof(error),"%s (%d)",gl_text(c,"ui.operation_failed"),p->result);
-        const float footer_height=(2+int(label_above)+int(stack_actions))*ImGui::GetFrameHeightWithSpacing()+12*scale+
+        const float calibration_height=steam_calibration?
+            std::max(ImGui::GetFrameHeight(),ImGui::CalcTextSize(gl_text(c,"calibration.steamHelp"),nullptr,false,content_width).y)+gap:
+            (1+int(label_above))*ImGui::GetFrameHeightWithSpacing();
+        const float footer_height=calibration_height+(1+int(stack_actions))*ImGui::GetFrameHeightWithSpacing()+12*scale+
             (status[0]?ImGui::CalcTextSize(status,nullptr,false,content_width).y+gap:0)+
             (error[0]?ImGui::CalcTextSize(error,nullptr,false,content_width).y+gap:0);
         if(!gl_menu_tab_setting_count(c,p->selected_tab)){
@@ -252,7 +258,12 @@ void GL_CALL gl_panel_draw(gl_panel* p,float width,float height,float dpi) try {
             const auto mark=[&](const char* key,const char* description){help(description);gyro_profile_widgets::marker(c,key,[&](const char* id){p->result=panel_command(p,{gyrolib_panel_detail::Inherit,id});});};
             const auto marker_width=[&](const char* key){return gyro_profile_widgets::marker_width(c,key);};
             const auto draw_row=[&](const gl_setting_info& info,bool detail){
-                const auto* key=base_key(info.id);const auto group=control_group(key,info.value);
+                const auto* key=base_key(info.id);auto group=control_group(key,info.value);
+                if(group==GL_ADVANCED_RECENTER){bool visible=false;
+                    for(uint32_t n=0;n<total;++n){gl_setting_info child{};gl_menu_tab_setting_at(c,tab.id,n,&child);
+                        if(child.visible&&gl_setting_advanced_group(child.id)==group){visible=true;break;}}
+                    if(!visible)group=GL_ADVANCED_NONE;
+                }
                 if(!info.visible||std::strcmp(key,"ui.scale")==0||std::strcmp(key,"gyro.invert_x")==0||std::strcmp(key,"gyro.invert_y")==0||std::strcmp(key,"gyro.invert_roll")==0||std::strcmp(key,"activation.stick_threshold")==0||std::strcmp(key,"activation.trigger_threshold")==0||std::strcmp(key,"activation.block_long_press")==0||std::strcmp(key,"settings.save")==0)return;
                 const auto& inline_limit=std::strcmp(key,"activation.trigger")==0?trigger_threshold:threshold;
                 const bool inline_threshold=(std::strcmp(key,"activation.stick_deflection")==0||std::strcmp(key,"activation.trigger")==0)&&inline_limit.visible;
@@ -275,6 +286,7 @@ void GL_CALL gl_panel_draw(gl_panel* p,float width,float height,float dpi) try {
                         parent_bottom=ImGui::GetItemRectMax().y;
                         help(gl_text(c,group==GL_ADVANCED_SMOOTHING?"ui.advanced.smoothing":
                             group==GL_ADVANCED_ACCELERATION?"ui.advanced.acceleration":
+                            group==GL_ADVANCED_RECENTER?"ui.advanced.recenter":
                             group==GL_ADVANCED_HOLD_DISABLE?"ui.advanced.hold_disable":"ui.advanced.flick"));
                         ImGui::SameLine(start+gutter);
                     }else ImGui::SetCursorPosX(start+gutter+(detail?16*scale:gl_setting_is_activator(info.id)?24*scale:0));
@@ -417,8 +429,9 @@ void GL_CALL gl_panel_draw(gl_panel* p,float width,float height,float dpi) try {
         ImGui::EndTabBar();
         }
         ImGui::Separator();
-        draw_automatic_calibration(p,automatic,combo_width,label_above);
-        ImGui::SameLine();draw_action(p,calibrate,calibrate_width);
+        if(steam_calibration){ImGui::AlignTextToFramePadding();ImGui::TextWrapped("%s",gl_text(c,"calibration.steamHelp"));}
+        else {draw_automatic_calibration(p,automatic,combo_width,label_above);
+            ImGui::SameLine();draw_action(p,calibrate,calibrate_width);}
         if(!recommended.visible)ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x-action_width);
         draw_action(p,reset,action_width,true);
         if(recommended.visible){if(!stack_actions)ImGui::SameLine();draw_action(p,recommended,action_width);}

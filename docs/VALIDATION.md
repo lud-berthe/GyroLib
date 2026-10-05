@@ -8,6 +8,68 @@ new game's hook correctness or input-to-photon latency.
 
 ## Latest SDK results
 
+The **1.2.0 release**, 5 October 2026, passes **53/53** bundled DLL tests,
+**53/53** full-static tests and **21/21** core-static tests on Windows x64/MSVC.
+Installed consumers and SDK regressions add **23/23** passing checks across
+DLL, static and core packages. The installed demo smoke test and quickstart
+build also pass. All 1.1.0 DLL exports remain present.
+The observations below record the incremental feature checks; outstanding
+hardware cases remain explicit.
+
+Local demo GPU renderer, 5 October 2026: **53/53** bundled tests pass. New GPU
+readbacks verify draw-order independence, intersecting triangles, near clipping,
+SDL state coexistence and target recreation/resizing. Twelve deterministic runs
+compare CPU/GPU rendering at two window sizes. [Performance results](PERFORMANCE.md)
+distinguish CPU submission, GPU work and synthetic core processing. A subsequent
+Steam-shortcut session confirms low main-thread acquisition/core costs and
+roughly 144 frames/s with VSync; the tester reports a substantial improvement.
+The report also retains isolated event/presentation stalls whose causes are not
+yet established.
+
+Local SDL mouse bridge, 5 October 2026: **52/52** bundled DLL tests, **52/52**
+full-static tests and **21/21** static-core tests pass. SDL window tests verify interception before events,
+exclusive context/window ownership, preservation of the host event filter,
+concurrent raw-callback detachment, window/reader destruction and explicit refusal
+of an unsupported runtime. Existing DX12, routing, cursor-clip and demo tests also
+pass. The SDL adapter and DX12 overlay now share the same DLL implementation.
+These tests do not synthesize desktop mouse movement. A subsequent physical-controller performance session through a non-Steam
+shortcut records both gyro and converted mouse output; the tester reports
+improved fluidity. This does not exhaust the three-mode routing and multi-monitor
+confinement checks.
+
+Local Steam Input mouse setting, 5 October 2026: **51/51** bundled DLL tests
+and **21/21** static-core tests pass. Tests cover corroborated detection, physical
+mouse rejection, the three modes, view/mode transitions, inheritance, save/load,
+camera and cursor output, and cursor-clip ownership. The new row is rendered in
+six languages at three sizes; the French screenshot was reviewed. Early visibility
+also checks Steam identity before any mouse movement, unrelated virtual devices,
+other controllers and withdrawal of Steam metadata. The conversion label is the
+same for camera and cursor views. The earlier
+routing prototype and two-monitor confinement were confirmed by the tester.
+The new automatic detection and three-choice per-view UI still need a hardware
+check across the complete mode/controller matrix. These changes ship in 1.2.0.
+
+Local recenter and calibration-menu changes, 5 October 2026: **50/50** bundled
+DLL tests and **20/20** static-core tests pass. Recenter tests cover the instant
+default, duration at three update intervals, interruption/restart, persistence
+and inheritance. The supplied panel is rendered with synthetic SDL/Steam
+endpoints in six languages at 1024×720, 1600×1100 and 3840×2160; the native demo
+menu also checks the new group and Steam footer. Steam hides calibration
+controls, SDL restores them. Screenshot review and physical-camera validation
+of timed recenter remain separate from these automated checks. These changes
+ship in 1.2.0.
+
+Local controller-transition correction, 5 October 2026: **49/49** bundled DLL
+tests, **21/21** targeted static tests and **8/8** external host tests pass.
+An 85 ms delay between the host's frame timestamp and sensor polling reproduced
+a fatal controls-protocol error. The reader now drops a controls report whose
+converted timestamp precedes its last accepted report, without disconnecting the
+sensor. A separate malformed-controls case still rejects invalid payloads.
+Controller-label regression checks SDL/Steam enumeration in both orders,
+disconnect/reconnect, renamed providers and names from explicitly bound sensors.
+These fixes ship in 1.2.0; the live
+Steam Input enable/disable/re-enable sequence still needs verification.
+
 The **1.1.0 release**, 5 October 2026, passes the fresh Windows x64/MSVC Release
 matrix below. The additional WARP test reads back scRGB and HDR10 pixels at
 80, 203 and 1000 nits, checks linear alpha composition, Rec.2020 conversion,
@@ -66,7 +128,7 @@ operations over 46 persisted view fields, comparing values and inheritance
 metadata after each save/load. These operations belong to tests, not separate
 CTest entries.
 
-Six catalogs contain 319 texts each. Catalog tests compare all 1,914 translations
+Six catalogs contain 322 texts each. Catalog tests compare all 1,932 translations
 with the public API; font checks cover every character. F10/native layouts run in
 all six languages at 1024×720 and 3840×2160. View names supplied by a mod are outside
 those catalogs. Availability checks disable settings without a controller, preserve

@@ -19,7 +19,11 @@ static gl_setting_info metadata(gl_context* c,const char* id){for(uint32_t n=0;n
 static void chains(){
     gyrolib::Context owner;auto* c=owner.get();for(uint32_t id:{1,2,3,4})view(c,id);
     set(c,1,"sensitivity_x",6);set(c,1,"gyro.smoothing_ms",30);
+    set(c,1,"camera.recenter_duration_ms",200);
     CHECK(gl_set_context_parent(c,2,1)==GL_OK);CHECK(gl_set_context_parent(c,3,2)==GL_OK);
+    near(get(c,3,"camera.recenter_duration_ms"),200);
+    set(c,2,"camera.recenter_duration_ms",0);near(get(c,3,"camera.recenter_duration_ms"),0);
+    inherit(c,2,"camera.recenter_duration_ms");near(get(c,3,"camera.recenter_duration_ms"),200);
     near(get(c,3,"sensitivity_x"),6);CHECK(info(c,3,"sensitivity_x").source_context==1);
     CHECK(!gl_can_inherit_context(c,1,3));CHECK(gl_set_context_parent(c,1,3)==GL_INVALID);
     CHECK(gl_set_context_parent(c,2,2)==GL_INVALID);CHECK(gl_set_context_parent(c,2,999)==GL_INVALID);

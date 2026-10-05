@@ -102,7 +102,7 @@
   "mode.hold": "Hold to enable",
   "mode.toggle": "Toggle",
   "calibration.action": "Recalibrate gyro",
-  "calibration.steamHelp": "Calibrate in Steam's controller settings.",
+  "calibration.steamHelp": "Calibration is managed by Steam Input.",
   "BlockLongPress": "BLOCK LONG PRESS",
   "ui.block_long_press": "Block long press",
   "description.BlockLongPress": "A short press triggers the game action on release. Holding only controls the gyro.",
@@ -317,5 +317,16 @@
   "inherit.view": "View",
   "inherit.help": "Use the settings from another view.",
   "recommended": "Use recommended settings",
-  "description.recommended": "Apply the settings recommended by this mod."
+  "description.recommended": "Apply the settings recommended by this mod.",
+  "RecenterDuration": "RECENTER DURATION",
+  "description.RecenterDuration": "Time taken to return the camera to a level view. Zero is instant.",
+  "ui.advanced.recenter": "Recenter options.",
+  "SteamMouse": "STEAM INPUT MOUSE",
+  "description.SteamMouse": "Choose what Steam Input mouse movement does.",
+  "steam_mouse.pass": "Pass through",
+  "steam_mouse.block": "Block",
+  "choice.steam_mouse.pass": "Let the game handle the mouse movement.",
+  "choice.steam_mouse.block": "Ignore the mouse movement.",
+  "steam_mouse.convert": "Convert movement",
+  "choice.steam_mouse.convert": "Use mouse movement to control the view."
 }

@@ -138,6 +138,7 @@ extern "C" {
 uint32_t GL_CALL gl_setting_advanced_group(const char* id){
     const int field=resolved_field(id);
     if(field==SmoothThreshold||field==Tightening)return GL_ADVANCED_SMOOTHING;
+    if(field==RecenterMs)return GL_ADVANCED_RECENTER;
     if(field>=FastSensX&&field<=FastSpeed)return GL_ADVANCED_ACCELERATION;
     if(field==FlickMs||(field>=FlickStyle&&field<=FlickExponent)||(field>=FlickSmoothSpeed&&field<=FlickPadOuter))return GL_ADVANCED_FLICK;
     if(field==HoldInvert||field==HoldTrackball||field==TemporaryInvertAxes||field==TrackballAxes||field==TrackballDecay)return GL_ADVANCED_HOLD_DISABLE;
@@ -200,7 +201,7 @@ int32_t GL_CALL gl_setting_at(const gl_context* c,uint32_t index,gl_setting_info
                 (i==1||(e->last_accel&&c->now>=e->last_accel&&c->now-e->last_accel<150000000));
             const auto state=e?e->motion.diagnostics.calibration_state:GL_CAL_IDLE;
             const bool pending=state==GL_CAL_COUNTDOWN||state==GL_CAL_COLLECTING||state==GL_CAL_MOVING;
-            out->visible=i==0?!pending:pending;
+            out->visible=(!e||e->info.source!=GL_SOURCE_STEAM)&&(i==0?!pending:pending);
             out->available=out->available&&out->visible;
         }
         if(i==3)out->visible=out->available=0; // legacy explicit save API; frontends auto-save edits
@@ -230,7 +231,7 @@ int32_t GL_CALL gl_setting_at(const gl_context* c,uint32_t index,gl_setting_info
     }
     if(index==Trigger)out->visible=out->available=c->trigger_inputs().available!=0&&int(v[Activation])!=GL_ALWAYS;
     if(index==TriggerThreshold)out->visible=out->available=v[Trigger]!=0&&c->trigger_inputs().available!=0&&int(v[Activation])!=GL_ALWAYS;
-    if(index==AutoCal){auto* e=c->endpoint(c->active);out->available=e&&e->info.source==GL_SOURCE_SDL&&
+    if(index==AutoCal){auto* e=c->endpoint(c->active);out->visible=!e||e->info.source!=GL_SOURCE_STEAM;out->available=e&&e->info.source==GL_SOURCE_SDL&&
         e->last_accel&&c->now>=e->last_accel&&c->now-e->last_accel<150000000;}
     const auto flick_inputs=c->flick_inputs();
     bool stick_hook=(c->host_capabilities&GL_HOST_NATIVE_STICK_SUPPRESSION)!=0;
@@ -261,7 +262,15 @@ int32_t GL_CALL gl_setting_at(const gl_context* c,uint32_t index,gl_setting_info
        (group==GL_ADVANCED_ACCELERATION&&!v[Acceleration])||
        (group==GL_ADVANCED_FLICK&&flick_mode==GL_FLICK_OFF))out->visible=out->available=0;
     const bool camera_view=c->effective_output_target(context_id)!=GL_OUTPUT_CURSOR;
-    if(index==RecenterButton)out->visible=out->available=camera_view&&c->recenter;
+    if(index==RecenterButton)out->visible=out->available=camera_view&&(c->recenter||c->recenter_step);
+    if(index==RecenterMs)out->visible=out->available=camera_view&&c->recenter_step&&v[RecenterButton]!=0;
+    if(index==SteamMouse){
+        const bool steam_pad=std::any_of(c->endpoints.begin(),c->endpoints.end(),[&](const auto& e){
+            return e.info.connected&&e.info.physical_id==c->selected&&(e.steam_input||e.info.source==GL_SOURCE_STEAM);
+        });
+        const bool ready=c->virtual_mouse&&(caps.touchpads&(GL_RIGHT|GL_SINGLE))&&steam_pad;
+        out->visible=out->available=connected&&c->selected&&(ready||c->steam_mouse_device==c->selected);
+    }
     if(index==ZoomCompensation)out->visible=out->available=camera_view&&context&&context->zoom_available;
     if(index==BlockLongPress){
         const bool hold=v[Activation]==double(GL_HOLD)||v[Activation]==double(GL_HOLD_DISABLE);
@@ -409,6 +418,7 @@ int32_t GL_CALL gl_choice_at(const gl_context* c,const char* id,uint32_t index,g
     if(field==Acceleration){const char* keys[]={"off","acceleration.low","acceleration.medium","acceleration.high","custom"};key=keys[index];
         // Custom describes an edited curve; it is not a selectable preset.
         if(index==4)out->available=0;}
+    if(field==SteamMouse){const char* keys[]={"steam_mouse.pass","steam_mouse.block","steam_mouse.convert"};key=keys[index];}
     if(field==FlickStyle){const char* keys[]={"flick.full","flick.pivot_only","flick.rotate_only"};key=keys[index];}
     if(field==FlickSnap){const char* keys[]={"off","flick.snap90","flick.snap45"};key=keys[index];}
     if(field==AutoCal){const char* keys[]={"off","menus","anytime"};key=keys[index];
@@ -462,6 +472,7 @@ const char* GL_CALL gl_choice_description(const gl_context* c,const char* id,dou
     if(field==FlickStyle&&v<3){const char* keys[]={"choice.flick.full","choice.flick.pivot_only","choice.flick.rotate_only"};key=keys[v];}
     if(field==FlickSnap&&v<3){const char* keys[]={"choice.flick.snap_off","choice.flick.snap90","choice.flick.snap45"};key=keys[v];}
     if(field==RecenterButton&&v<=32)key=v?"description.RecenterButton":"choice.side.off";
+    if(field==SteamMouse&&v<3){const char* keys[]={"choice.steam_mouse.pass","choice.steam_mouse.block","choice.steam_mouse.convert"};key=keys[v];}
     if(field==AutoCal&&v<3){const char* keys[]={"choice.calibration.off","choice.calibration.menus","choice.calibration.anytime"};key=keys[v];}
     if(field==FlickMode){if(v==GL_FLICK_OFF)key="choice.flick.off";if(v==GL_FLICK_ON)key="choice.flick.on";
         if(v==GL_FLICK_TOUCHPAD)key="choice.flick.touchpad";if(v==GL_FLICK_BOTH)key="choice.flick.both";}

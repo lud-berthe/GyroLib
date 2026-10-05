@@ -102,7 +102,7 @@
   "mode.hold": "Zum Aktivieren halten",
   "mode.toggle": "Umschalten",
   "calibration.action": "Gyro neu kalibrieren",
-  "calibration.steamHelp": "In den Steam-Controllereinstellungen kalibrieren.",
+  "calibration.steamHelp": "Steam Input übernimmt die Kalibrierung.",
   "BlockLongPress": "HALTEN BLOCKIEREN",
   "ui.block_long_press": "Halten blockieren",
   "description.BlockLongPress": "Kurzes Drücken löst die Spielaktion beim Loslassen aus. Halten steuert nur den Gyro.",
@@ -317,5 +317,16 @@
   "inherit.view": "Ansicht",
   "inherit.help": "Einstellungen einer anderen Ansicht übernehmen.",
   "recommended": "Empfohlene Einstellungen",
-  "description.recommended": "Die von dieser Mod empfohlenen Einstellungen anwenden."
+  "description.recommended": "Die von dieser Mod empfohlenen Einstellungen anwenden.",
+  "RecenterDuration": "ZENTRIERUNGSDAUER",
+  "description.RecenterDuration": "Zeit zum waagerechten Ausrichten der Kamera. Bei null erfolgt es sofort.",
+  "ui.advanced.recenter": "Zentrierungsoptionen.",
+  "SteamMouse": "STEAM-INPUT-MAUS",
+  "description.SteamMouse": "Verhalten der Mausbewegungen von Steam Input.",
+  "steam_mouse.pass": "Durchlassen",
+  "steam_mouse.block": "Blockieren",
+  "choice.steam_mouse.pass": "Das Spiel verarbeitet die Mausbewegungen.",
+  "choice.steam_mouse.block": "Mausbewegungen ignorieren.",
+  "steam_mouse.convert": "Bewegung umwandeln",
+  "choice.steam_mouse.convert": "Die Ansicht mit Mausbewegungen steuern."
 }

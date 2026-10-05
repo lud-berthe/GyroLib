@@ -112,6 +112,9 @@ These checks do not add smoothing or a dead zone to output. Very slow intentiona
 rotation remains indistinguishable from bias in some conditions. Larger drift
 requires manual calibration or a safe idle interval. Steam Input samples receive
 no local bias correction; its internal calibration remains outside this API.
+While Steam Input is the active motion source, the menu hides both calibration
+controls and displays "Calibration is managed by Steam Input." in their place.
+Returning to SDL restores the controls and the saved automatic policy.
 
 ## Smoothing
 
@@ -208,14 +211,38 @@ Optional right-pad feedback is dispatched explicitly through
 
 ## Recenter camera
 
-Register `gl_set_recenter_callback(context, callback, user)` when the mod can
-center camera pitch. This exposes `camera.recenter_button`, default Off, using
+Register `gl_set_recenter_step_callback(context, callback, user)` when the mod can
+adjust camera pitch. This exposes `camera.recenter_button`, default Off, using
 controller-specific labels. The host may also call `gl_request_recenter` for a
 keyboard or game action. The library does not suppress the button's normal action.
 
-The callback runs after camera deltas on the owner thread. Requests are discarded
+Recenter's + expands `camera.recenter_duration_ms`: 0..1000 ms in 5 ms steps,
+default 0 (instant). The child and + are hidden while the binding is Off. Duration
+is saved per view and follows the same inheritance rules as other view settings.
+GyroLib advances a smoothstep transition using the update clock; the callback
+receives the fraction of remaining pitch to remove on that update:
+
+```cpp
+void GL_CALL recenter_step(void* user, double fraction) {
+    auto& camera = *static_cast<Camera*>(user);
+    camera.pitch += (camera.level_pitch - camera.pitch) * fraction;
+}
+```
+
+Use the camera's own units; do not multiply the fraction by time or sensitivity.
+The final callback supplies 1, reaching level exactly. A new request restarts
+from the current pitch. Passing NULL as the callback withdraws support and
+cancels a running transition.
+
+Callbacks run after the camera-delta callback on the owner thread. If the host
+instead consumes returned deltas, queue the fraction and apply it after those
+deltas. For multiple updates before one camera write, combine fractions as
+`combined = 1 - (1 - combined) * (1 - fraction)`.
+
+Requests are discarded and running transitions cancelled
 when unfocused, paused, on a cursor view, or in a menu unless that camera view
-explicitly permits menu output. Holding a button through a focus/view/controller
+explicitly permits menu output. Opening the library panel or changing the view
+or controller also cancels a transition. Holding a button through a focus/view/controller
 transition cannot create an extra edge. Center the game camera, not gyro orientation.
 
 ## Zoom compensation

@@ -413,10 +413,46 @@ static void metadata_and_persistence(){
     const auto file=std::filesystem::temp_directory_path()/"gyrolib-advanced-persistence.ini";
     {std::ofstream out(file);out<<"schema=0.2.0\nui.menu_key=\ncontext.1.sensitivity_x=7.2\ncontext.1.gyro.smoothing_ms=85\ncustom.host=keep\n";}
     CHECK(gl_load_settings(f.c,file.string().c_str())==GL_OK);near(f.info("sensitivity_x").value,7.2);near(f.info("gyro.smoothing_ms").value,85);
-    f.set("gyro.tightening_dps",.35);f.set("gyro.space",GL_SPACE_PLAYER_LEAN);f.set("flick.snap",2);
+    f.set("gyro.tightening_dps",.35);f.set("gyro.space",GL_SPACE_PLAYER_LEAN);f.set("flick.snap",2);f.set("camera.recenter_duration_ms",315);
     Fixture loaded;CHECK(gl_load_settings(loaded.c,file.string().c_str())==GL_OK);near(loaded.info("gyro.tightening_dps").value,.35);near(loaded.info("flick.snap").value,2);
+    near(loaded.info("camera.recenter_duration_ms").value,315);
     CHECK(gl_get_menu_key(loaded.c)==0);std::ifstream in(file);std::string data((std::istreambuf_iterator<char>(in)),{});CHECK(data.find("schema=0.2.0")!=std::string::npos&&data.find("custom.host=keep")!=std::string::npos);
     in.close();std::filesystem::remove(file);
+}
+static void timed_recenter(){
+    for(uint64_t dt:{1000000ull,10000000ull,25000000ull}){
+        Fixture f;double pitch=60;
+        near(f.info("camera.recenter_duration_ms").value,0);
+        gl_set_recenter_step_callback(f.c,[](void* p,double fraction){CHECK(fraction>0&&fraction<=1);*static_cast<double*>(p)*=1-fraction;},&pitch);
+        CHECK(!f.info("camera.recenter_duration_ms").visible);f.set("camera.recenter_button",9);
+        CHECK(f.info("camera.recenter_duration_ms").visible);
+        CHECK(gl_setting_advanced_group("context.1.camera.recenter_duration_ms")==GL_ADVANCED_RECENTER);
+        f.set("camera.recenter_duration_ms",200);CHECK(gl_request_recenter(f.c)==GL_OK);f.tick({},dt);near(pitch,60);
+        for(uint64_t t=0;t<100000000;t+=dt)f.tick({},dt);near(pitch,30);
+        for(uint64_t t=0;t<100000000;t+=dt)f.tick({},dt);near(pitch,0);
+        pitch=-40;gl_request_recenter(f.c);f.tick({},dt);f.tick({},50000000);CHECK(pitch>-40&&pitch<0);
+        gl_request_recenter(f.c);f.tick({},dt);const double restarted=pitch;
+        f.tick({},100000000);near(pitch,restarted*.5);
+        f.host.focused=0;f.tick({},dt);const double cancelled=pitch;f.host.focused=1;
+        for(int i=0;i<30;++i)f.tick();near(pitch,cancelled);
+        f.set("camera.recenter_duration_ms",0);gl_request_recenter(f.c);f.tick();near(pitch,0);
+        f.set("camera.recenter_button",0);CHECK(!f.info("camera.recenter_duration_ms").visible);
+        gl_set_recenter_callback(f.c,[](void*){},nullptr);f.set("camera.recenter_button",9);CHECK(!f.info("camera.recenter_duration_ms").visible);
+    }
+    for(int interruption=0;interruption<5;++interruption){
+        Fixture f;double pitch=60;
+        gl_set_recenter_step_callback(f.c,[](void* p,double fraction){*static_cast<double*>(p)*=1-fraction;},&pitch);
+        f.set("camera.recenter_duration_ms",200);gl_request_recenter(f.c);f.tick();f.tick({},50000000);
+        const double stopped=pitch;CHECK(stopped>0&&stopped<60);
+        if(interruption==0)f.host.paused=1;
+        if(interruption==1)gl_set_panel_open(f.c,1);
+        if(interruption==2)gl_set_gameplay_context_output_target(f.c,1,GL_OUTPUT_CURSOR);
+        if(interruption==3){gl_gameplay_context other{2,"Other","",5};gl_register_gameplay_context(f.c,&other);gl_set_gameplay_context_state(f.c,2,1,1);}
+        if(interruption==4)gl_set_recenter_step_callback(f.c,nullptr,nullptr);
+        f.tick();near(pitch,stopped);f.host.paused=0;gl_set_panel_open(f.c,0);
+        gl_set_gameplay_context_output_target(f.c,1,GL_OUTPUT_CAMERA);
+        for(int i=0;i<30;++i)f.tick();near(pitch,stopped);
+    }
 }
 int main(){try{
     const auto run=[](const char* name,auto test){try{test();}catch(const std::exception& e){throw std::runtime_error(std::string(name)+": "+e.what());}};
@@ -426,5 +462,6 @@ int main(){try{
     run("Yaw + Roll independent inversions",combined_axis_inversion);
     run("laser ray geometry",laser_ray_geometry);run("flick options",flick_options);run("calibration guard",calibration_guard);
     run("camera hooks",camera_hooks);run("metadata and persistence",metadata_and_persistence);
-    std::cout<<"Advanced motion: 12 synthetic regression groups passed\n";return 0;
+    run("timed recenter",timed_recenter);
+    std::cout<<"Advanced motion: 13 synthetic regression groups passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

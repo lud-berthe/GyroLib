@@ -32,6 +32,7 @@ struct PauseMenu {
         if(!std::strcmp(key,"gyro.smoothing_ms")&&value>0)return GL_ADVANCED_SMOOTHING;
         if(!std::strcmp(key,"gyro.acceleration")&&value>0)return GL_ADVANCED_ACCELERATION;
         if(!std::strcmp(key,"flick.mode")&&int(value)!=GL_FLICK_OFF)return GL_ADVANCED_FLICK;
+        if(!std::strcmp(key,"camera.recenter_button")&&value>0)return GL_ADVANCED_RECENTER;
         return GL_ADVANCED_NONE;
     }
     void marker(gl_context* c,const gl_setting_info& s){gyro_profile_widgets::marker(c,s.id,[&](const char* id){result=gl_setting_inherit(c,id);});}
@@ -113,7 +114,8 @@ struct PauseMenu {
             float label_bottom=0,parent_stem=0,activator_top=0,activator_stem=0;
             bool activator_heading=false;
             const auto draw_row=[&](const gl_setting_info& s,bool detail){
-                const auto* key=suffix(s.id);const auto group=control_group(key,s.value);
+                const auto* key=suffix(s.id);auto group=control_group(key,s.value);
+                if(group==GL_ADVANCED_RECENTER&&std::none_of(rows.begin(),rows.end(),[](const auto& row){return gl_setting_advanced_group(row.id)==GL_ADVANCED_RECENTER;}))group=GL_ADVANCED_NONE;
                 if(!std::strcmp(key,"gyro.invert_x")||!std::strcmp(key,"gyro.invert_y")||!std::strcmp(key,"gyro.invert_roll")||!std::strcmp(key,"activation.block_long_press")||
                     !std::strcmp(key,"activation.stick_threshold")||!std::strcmp(key,"activation.trigger_threshold"))return;
                 ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::AlignTextToFramePadding();
@@ -129,6 +131,7 @@ struct PauseMenu {
                     parent_bottom=ImGui::GetItemRectMax().y;
                     ImGui::EndDisabled();help(gl_text(c,group==GL_ADVANCED_SMOOTHING?"ui.advanced.smoothing":
                         group==GL_ADVANCED_ACCELERATION?"ui.advanced.acceleration":
+                        group==GL_ADVANCED_RECENTER?"ui.advanced.recenter":
                         group==GL_ADVANCED_HOLD_DISABLE?"ui.advanced.hold_disable":"ui.advanced.flick"));ImGui::PopID();
                     ImGui::SameLine(start+gutter);
                 }else ImGui::SetCursorPosX(start+gutter+(detail?16*scale:gl_setting_is_activator(s.id)?24*scale:0));
@@ -219,8 +222,9 @@ struct PauseMenu {
             else if(!std::strcmp(s.id,"calibration.begin")||!std::strcmp(s.id,"calibration.cancel"))action=s;
         }
         gl_diagnostics d{};gl_get_diagnostics(c,&d);
+        const bool steam_calibration=d.source==GL_SOURCE_STEAM;
         const char* key=d.calibration_state==GL_CAL_COLLECTING?"calibration.collecting":d.calibration_state==GL_CAL_MOVING?"calibration.moving":
-            d.calibration_state==GL_CAL_COMPLETE?"calibration.complete":d.calibration_state==GL_CAL_EXTERNAL?"calibration.steamHelp":nullptr;
+            d.calibration_state==GL_CAL_COMPLETE?"calibration.complete":nullptr;
         char status[512]{},error[512]{};
         if(d.calibration_state==GL_CAL_COUNTDOWN)std::snprintf(status,sizeof(status),"%s %.1f s",gl_text(c,"calibration.countdown"),d.calibration_seconds_remaining);
         else if(key)std::snprintf(status,sizeof(status),"%s",gl_text(c,key));
@@ -230,20 +234,25 @@ struct PauseMenu {
         const float width=ImGui::GetContentRegionAvail().x,gap=ImGui::GetStyle().ItemSpacing.x;
         const float padding=2*ImGui::GetStyle().FramePadding.x;
         const float label_width=ImGui::CalcTextSize(gl_text(c,"ui.auto_calibration")).x;
-        const float calibrate_width=ImGui::CalcTextSize(action.label).x+padding;
-        const bool label_above=label_width+150*scale+calibrate_width+2*gap>width;
+        const float calibrate_width=ImGui::CalcTextSize(action.label?action.label:"").x+padding;
+        const bool label_above=!steam_calibration&&label_width+150*scale+calibrate_width+2*gap>width;
         const float combo_width=width-calibrate_width-gap-(label_above?0:label_width+gap);
         const float half_width=(width-gap)*.5f;
         const bool stack_actions=recommended.visible&&std::max(ImGui::CalcTextSize(reset.label).x,
             ImGui::CalcTextSize(recommended.label).x)+padding>half_width;
         const float action_width=stack_actions?width:half_width;
-        const float height=(2+int(label_above)+int(stack_actions))*ImGui::GetFrameHeightWithSpacing()+12*scale+
+        const float calibration_height=steam_calibration?
+            std::max(ImGui::GetFrameHeight(),ImGui::CalcTextSize(gl_text(c,"calibration.steamHelp"),nullptr,false,width).y)+gap:
+            (1+int(label_above))*ImGui::GetFrameHeightWithSpacing();
+        const float height=calibration_height+(1+int(stack_actions))*ImGui::GetFrameHeightWithSpacing()+12*scale+
             (status[0]?ImGui::CalcTextSize(status,nullptr,false,width).y+gap:0)+
             (error[0]?ImGui::CalcTextSize(error,nullptr,false,width).y+gap:0);
         if(measure)return height;
-        ImGui::Separator();ImGui::AlignTextToFramePadding();ImGui::TextUnformatted(gl_text(c,"ui.auto_calibration"));
-        if(!label_above)ImGui::SameLine();widget(c,automatic,combo_width);
-        ImGui::SameLine();widget(c,action,calibrate_width);
+        ImGui::Separator();ImGui::AlignTextToFramePadding();
+        if(steam_calibration)ImGui::TextWrapped("%s",gl_text(c,"calibration.steamHelp"));
+        else {ImGui::TextUnformatted(gl_text(c,"ui.auto_calibration"));
+            if(!label_above)ImGui::SameLine();widget(c,automatic,combo_width);
+            ImGui::SameLine();widget(c,action,calibrate_width);}
         if(!recommended.visible)ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x-action_width);
         ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(0,0,0,0));ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize,1.f);
         widget(c,reset,action_width);ImGui::PopStyleVar();ImGui::PopStyleColor();

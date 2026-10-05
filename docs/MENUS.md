@@ -74,7 +74,7 @@ The supplied frontends arrange controls as follows:
 
 `gl_setting_is_activator(id)` identifies activator families and their inline
 controls. `gl_setting_advanced_group(id)` identifies Smoothing, Acceleration,
-Flick and Hold-to-disable children. The examples place a +/− to the left of the
+Flick, Recenter and Hold-to-disable children. The examples place a +/− to the left of the
 parent label and indent children with branch lines. Expansion is UI state per
 view, not a saved setting. Hide feature expanders and children while Off.
 
@@ -168,6 +168,7 @@ A menu can query every frame or invalidate cached widgets through `gl_poll_event
 | `GL_EVENT_HOST_CAPABILITIES` | Availability dependent on host hooks |
 | `GL_EVENT_CONTEXT` | View/model metadata; details below |
 | `GL_EVENT_CALIBRATION` | Status and begin/cancel action visibility |
+| `GL_EVENT_SOURCE` | Active motion source and calibration control visibility |
 
 DEVICE details 2/3 are not tied to one endpoint. CONTEXT detail 0 reports runtime
 view state, 3 destination changes, 6 inheritance metadata, 7 recommendations and
@@ -180,6 +181,8 @@ Copy borrowed metadata you retain. The [API event contract](API.md#events)
 explains queue limits and legacy polling. Requery visibility after actions:
 manual calibration exposes Begin at rest and Cancel throughout countdown,
 collection and movement retries. Begin stays disabled without a usable SDL source.
+With Steam Input active, hide calibration widgets according to their `visible`
+flags and show `gl_text(context, "calibration.steamHelp")` in that area instead.
 The [motion guide](ADVANCED_MOTION.md#calibration) covers calibration policy/status.
 
 ## Static ImGui panel integration
@@ -218,3 +221,8 @@ it must enable its sensors.
 ---
 
 Previous: [Inheritance and recommendations](INHERITANCE.md) · Next: [Distribution](DISTRIBUTION.md)
+
+The per-view `input.steam_mouse` entry appears last when the Windows
+[overlay bridge identifies a compatible Steam Input controller](OVERLAY.md#steam-input-mouse-movement).
+Use its normal `visible` field and choice descriptions in a native menu; no extra
+UI-specific detection or persistence is needed.

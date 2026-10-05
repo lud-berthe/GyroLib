@@ -56,3 +56,5 @@ GL_SETTING(StickEffect,"gyro.look_stick_effect","StickEffect",GL_SETTING_ENUM,0,
 GL_SETTING(HoldInvert,"activation.temporary_invert","HoldInvert",GL_SETTING_BOOL,0,0,1,1,"")
 GL_SETTING(HoldTrackball,"activation.trackball","HoldTrackball",GL_SETTING_BOOL,0,0,1,1,"")
 GL_SETTING(InvertRoll,"gyro.invert_roll","InvertRoll",GL_SETTING_BOOL,0,0,1,1,"")
+GL_SETTING(RecenterMs,"camera.recenter_duration_ms","RecenterDuration",GL_SETTING_NUMBER,0,0,1000,5,"ms")
+GL_SETTING(SteamMouse,"input.steam_mouse","SteamMouse",GL_SETTING_ENUM,1,0,2,1,"")

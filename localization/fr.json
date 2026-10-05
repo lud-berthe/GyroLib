@@ -102,7 +102,7 @@
   "mode.hold": "Maintenir pour activer",
   "mode.toggle": "Basculer",
   "calibration.action": "Recalibrer le gyroscope",
-  "calibration.steamHelp": "Calibrez dans les paramètres de manette Steam.",
+  "calibration.steamHelp": "La calibration est gérée par Steam Input.",
   "BlockLongPress": "BLOQUER L'APPUI LONG",
   "ui.block_long_press": "Bloquer l'appui long",
   "description.BlockLongPress": "Un appui court déclenche l'action du jeu au relâchement. Maintenir contrôle uniquement le gyro.",
@@ -317,5 +317,16 @@
   "inherit.view": "Vue",
   "inherit.help": "Reprendre les réglages d'une autre vue.",
   "recommended": "Utiliser les réglages recommandés",
-  "description.recommended": "Appliquer les réglages conseillés par ce mod."
+  "description.recommended": "Appliquer les réglages conseillés par ce mod.",
+  "RecenterDuration": "DURÉE DU RECENTRAGE",
+  "description.RecenterDuration": "Temps nécessaire pour ramener la caméra à l'horizontale. À zéro, le recentrage est instantané.",
+  "ui.advanced.recenter": "Options de recentrage.",
+  "SteamMouse": "SOURIS STEAM INPUT",
+  "description.SteamMouse": "Choisissez comment utiliser les mouvements de souris Steam Input.",
+  "steam_mouse.pass": "Laisser passer",
+  "steam_mouse.block": "Bloquer",
+  "choice.steam_mouse.pass": "Laisser le jeu gérer les mouvements de souris.",
+  "choice.steam_mouse.block": "Ignorer les mouvements de souris.",
+  "steam_mouse.convert": "Convertir en mouvement",
+  "choice.steam_mouse.convert": "Utiliser les mouvements de souris pour contrôler la vue."
 }

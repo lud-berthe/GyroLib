@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cfloat>
 #include <cstdio>
+#include "detail/mouse_bridge.hpp"
 using Microsoft::WRL::ComPtr;
 thread_local ImGuiContext* gl_overlay_imgui_context{};
 namespace {
@@ -35,6 +36,8 @@ struct Frame {ComPtr<ID3D12Resource> buffer;ComPtr<ID3D12CommandAllocator> alloc
 // UI needs capability/timestamp/diagnostic snapshots, never fusion or samples.
 std::unique_ptr<gl_context> snapshot(const gl_context& c){
     auto out=std::make_unique<gl_context>();
+    out->steam_mouse_device=c.steam_mouse_device;
+    if(c.virtual_mouse)out->virtual_mouse=[](void*,gl_output*,bool,uint32_t,uint32_t){};
     out->settings=c.settings;out->gameplay_contexts=c.gameplay_contexts;out->context_settings=c.context_settings;
     out->profile_links=c.profile_links;out->recommended=c.recommended;
     out->manual_motion_groups=c.manual_motion_groups;out->host_capabilities=c.host_capabilities;
@@ -44,9 +47,10 @@ std::unique_ptr<gl_context> snapshot(const gl_context& c){
     out->host=c.host;out->panel=c.panel;out->output=c.output;out->totals=c.totals;
     out->panel_opening=c.panel_opening;out->panel_opening_context=c.panel_opening_context;
     if(c.recenter)out->recenter=[](void*){};
+    if(c.recenter_step)out->recenter_step=[](void*,double){};
     for(const auto& e:c.endpoints){out->endpoints.emplace_back();auto& d=out->endpoints.back();
         d.info=e.info;d.motion_companion=e.motion_companion;d.companion_identity=e.companion_identity;
-        d.pairing_vendor=e.pairing_vendor;d.virtual_controller=e.virtual_controller;d.control_authority=e.control_authority;
+        d.pairing_vendor=e.pairing_vendor;d.virtual_controller=e.virtual_controller;d.steam_input=e.steam_input;d.control_authority=e.control_authority;
         d.button_labels=e.button_labels;d.label_provenance=e.label_provenance;d.button_contacts=e.button_contacts;
         d.controls=e.controls;d.flick_input=e.flick_input;d.flick_explicit=e.flick_explicit;d.triggers=e.triggers;
         d.trigger_labels=e.trigger_labels;d.last_sensor=e.last_sensor;d.last_arrival=e.last_arrival;
@@ -70,6 +74,8 @@ ImGuiKey key(WPARAM value,LPARAM flags){
 }
 }
 struct gl_overlay {
+    gyrolib_detail::MouseBridge* mouse_bridge{};
+    ~gl_overlay(){gyrolib_detail::mouse_bridge_destroy(mouse_bridge);}
     gl_context* owner{};DWORD owner_thread{},render_thread{};
     std::mutex mutex;std::vector<OwnedCommand> commands;std::vector<Message> messages;
     std::unique_ptr<gl_context> published,mirror;uint64_t published_at{},mirror_at{};
@@ -167,9 +173,14 @@ gl_overlay* GL_CALL gl_overlay_create(gl_context* c,uint32_t abi)try{
     if(!c||abi!=GL_OVERLAY_ABI_VERSION){fail("Invalid overlay context/ABI");return nullptr;}
     std::lock_guard lock(registry_mutex);if(registered.count(c)){fail("One overlay per context");return nullptr;}
     auto o=std::make_unique<gl_overlay>();o->owner=c;o->owner_thread=GetCurrentThreadId();
+    if(c->virtual_mouse){fail("Context already has a mouse input bridge");return nullptr;}
     o->open=c->panel;o->shortcut=c->menu_key;o->published=snapshot(*c);o->published_at=ticks();
+    o->mouse_bridge=gyrolib_detail::mouse_bridge_create(c);
+    if(!o->mouse_bridge){fail("Cannot allocate mouse input bridge",GL_LIMIT);return nullptr;}
     registered.insert(c);c->overlay_user=o.get();c->publish_overlay=publish_after_update;
-    c->panel_changed=[](void* user,bool open){static_cast<gl_overlay*>(user)->open=open;};
+    c->panel_changed=[](void* user,bool open){auto* overlay=static_cast<gl_overlay*>(user);overlay->open=open;
+        gyrolib_detail::mouse_bridge_panel(overlay->mouse_bridge,open);
+    };
     return o.release();
 }catch(...){fail("Cannot allocate overlay",GL_LIMIT);return nullptr;}
 int32_t GL_CALL gl_overlay_process(gl_overlay* o)try{
@@ -196,17 +207,28 @@ int32_t GL_CALL gl_overlay_detach(gl_overlay* o)try{
     if(!o||GetCurrentThreadId()!=o->owner_thread)return fail("detach requires context owner thread");
     std::lock_guard lock(registry_mutex);
     if(!o->attached.exchange(false))return GL_OK;gl_set_panel_open(o->owner,0);
+    gyrolib_detail::mouse_bridge_stop(o->mouse_bridge);
     o->owner->publish_overlay=nullptr;o->owner->panel_changed=nullptr;o->owner->overlay_user=nullptr;o->publish_pending=false;
+    gyrolib_detail::mouse_bridge_destroy(o->mouse_bridge);o->mouse_bridge=nullptr;
     registered.erase(o->owner);o->owner=nullptr;o->open=false;return GL_OK;
 }catch(...){return fail("Cannot detach overlay",GL_LIMIT);}
 int32_t GL_CALL gl_overlay_destroy(gl_overlay* o){
     if(!o)return GL_OK;if(o->attached||o->imgui)return fail("detach and shutdown before destroy");delete o;return GL_OK;
 }
-int32_t GL_CALL gl_overlay_set_open(gl_overlay* o,uint32_t open){if(!o||open>1)return GL_INVALID;if(!o->attached)return GL_UNAVAILABLE;o->open=open!=0;return GL_OK;}
+int32_t GL_CALL gl_overlay_set_open(gl_overlay* o,uint32_t open){if(!o||open>1)return GL_INVALID;if(!o->attached)return GL_UNAVAILABLE;o->open=open!=0;
+    gyrolib_detail::mouse_bridge_panel(o->mouse_bridge,open!=0);
+    return GL_OK;}
 uint32_t GL_CALL gl_overlay_capture(const gl_overlay* o){return o&&o->attached&&o->ready&&o->open?
     GL_OVERLAY_CAPTURE_MOUSE|GL_OVERLAY_CAPTURE_KEYBOARD|GL_OVERLAY_CAPTURE_GAMEPAD:0;}
 uint32_t GL_CALL gl_overlay_win32_message(gl_overlay* o,void* window,uint32_t message,uint64_t wp,int64_t lp)try{
     if(!o||!o->attached||!o->ready||reinterpret_cast<uintptr_t>(window)!=o->window)return 0;
+    const bool routed=gyrolib_detail::mouse_bridge_message(o->mouse_bridge,window,message,wp,lp);
+    if(routed){
+        // Foreground raw input needs its normal Win32 cleanup even when the
+        // existing host message callback suppresses delivery to gameplay.
+        if(message==WM_INPUT)DefWindowProcW(static_cast<HWND>(window),message,WPARAM(wp),LPARAM(lp));
+        return GL_OVERLAY_CAPTURE_MOUSE;
+    }
     bool relevant=false;uint32_t capture=0;
     switch(message){case WM_KEYDOWN:case WM_SYSKEYDOWN:case WM_KEYUP:case WM_SYSKEYUP:case WM_CHAR:case WM_UNICHAR:
         relevant=true;capture=GL_OVERLAY_CAPTURE_KEYBOARD;break;
@@ -217,6 +239,7 @@ uint32_t GL_CALL gl_overlay_win32_message(gl_overlay* o,void* window,uint32_t me
     const auto shortcut=o->shortcut.load();
     if(shortcut&&(message==WM_KEYDOWN||message==WM_SYSKEYDOWN)&&wp==VK_F1+shortcut-1&&!(lp&(1ll<<30))){
         o->open=!o->open.load();capture=GL_OVERLAY_CAPTURE_KEYBOARD;
+        gyrolib_detail::mouse_bridge_panel(o->mouse_bridge,o->open);
         std::lock_guard lock(o->mutex);o->messages.clear();o->reset_input=true;return capture;
     }
     if(relevant){std::lock_guard lock(o->mutex);if(o->messages.size()>=1024){o->messages.clear();o->reset_input=true;}
@@ -276,7 +299,7 @@ int32_t GL_CALL gl_overlay_dx12_init(gl_overlay* o,const gl_overlay_dx12_desc* d
         auto& p=*static_cast<gl_overlay*>(i->UserData);p.free_srv.push_back(unsigned((cpu.ptr-p.srv->GetCPUDescriptorHandleForHeapStart().ptr)/p.srv_stride));};
     o->backend=ImGui_ImplDX12_Init(&info);if(!o->backend)return cleanup(fail("ImGui DX12 initialization",GL_IO_ERROR));
     if(!ImGui_ImplDX12_CreateDeviceObjects())return cleanup(fail("DX12 shader/device objects",GL_IO_ERROR));
-    o->window=reinterpret_cast<uintptr_t>(desc->window);o->ready=true;return GL_OK;
+    o->window=reinterpret_cast<uintptr_t>(desc->window);o->ready=true;gyrolib_detail::mouse_bridge_window(o->mouse_bridge,desc->window);return GL_OK;
 }catch(...){if(o&&o->render_thread==GetCurrentThreadId())gl_overlay_dx12_shutdown(o);return fail("DX12 initialization allocation",GL_LIMIT);}
 int32_t GL_CALL gl_overlay_dx12_render(gl_overlay* o,double delta,float dpi)try{
     if(!render_thread(o)||!o->ready)return fail("render requires initialized render thread");
@@ -341,7 +364,9 @@ int32_t GL_CALL gl_overlay_dx12_set_hdr_white_level(gl_overlay* o,float nits){
 }
 int32_t GL_CALL gl_overlay_dx12_shutdown(gl_overlay* o)try{
     if(!o)return GL_OK;if(o->render_thread&& !render_thread(o))return fail("shutdown requires render thread");
-    o->ready=false;int result=GL_OK;if(o->fence&&o->submitted)result=wait(*o,o->submitted);
+    o->ready=false;
+    gyrolib_detail::mouse_bridge_window(o->mouse_bridge,nullptr);
+    int result=GL_OK;if(o->fence&&o->submitted)result=wait(*o,o->submitted);
     if(result!=GL_OK&&o->device&&SUCCEEDED(o->device->GetDeviceRemovedReason()))return result;
     if(o->imgui){ContextScope scope(o->imgui);if(o->backend)ImGui_ImplDX12_Shutdown();gl_panel_destroy(o->panel);o->panel=nullptr;
         if(scope.previous==o->imgui)scope.previous=nullptr;

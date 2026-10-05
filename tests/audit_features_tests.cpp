@@ -1,4 +1,5 @@
 #include <gyrolib/gyrolib.hpp>
+#include "../src/detail/internal.hpp"
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -276,9 +277,11 @@ static void persistence_and_menu(){
 }
 static void all_menu_options(){
     Fixture f;
+    f.c->steam_mouse_device=f.c->selected; // synthetic detection for the complete menu audit
     gl_set_host_capabilities(f.c,GL_HOST_NATIVE_STICK_SUPPRESSION|GL_HOST_NATIVE_TOUCHPAD_SUPPRESSION|
         GL_HOST_LONG_PRESS_BLOCKING|GL_HOST_MENU_STATE);
-    gl_set_recenter_callback(f.c,[](void*){},nullptr);
+    gl_set_recenter_step_callback(f.c,[](void*,double){},nullptr);
+    f.set("camera.recenter_button",9);
     CHECK(gl_set_gameplay_context_zoom_available(f.c,1,1)==GL_OK);
     const gl_trigger_input triggers{f.now,GL_LEFT|GL_RIGHT,0,0};
     const gl_flick_input flick{f.now,GL_FLICK_INPUT_STICK|GL_FLICK_INPUT_TOUCHPAD,0,0,0,0,0};
@@ -289,7 +292,7 @@ static void all_menu_options(){
     f.set("activation.trackball",1);f.set("gyro.smoothing_ms",25);
     f.set("gyro.acceleration",1);f.set("flick.snap",2);
     // Union of every supported mode: a current field must be reachable somewhere,
-    // including inline controls and children of the four advanced groups.
+    // including inline controls and children of advanced groups.
     std::map<std::string,gl_setting_info> exposed;
     const auto collect=[&](uint64_t tab){
         for(uint32_t i=0;i<gl_menu_tab_setting_count(f.c,tab);++i){gl_setting_info s{};

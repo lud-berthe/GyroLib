@@ -94,6 +94,7 @@ struct EndpointState {
     uint64_t companion_identity{};
     uint32_t pairing_vendor{};
     bool virtual_controller{};
+    bool steam_input{}; // authoritative acquisition metadata, not a display name
     uint32_t control_authority{};
     std::array<std::string,32> button_labels;
     std::array<uint32_t,32> label_provenance{};
@@ -167,10 +168,18 @@ struct gl_context {
     std::array<FlickTimeline,2> flick_timelines{};
     std::array<gyrolib::LongPressBlocker,64> long_press_blockers;
     gl_camera_callback camera{};
+    // Private window-input bridge; no additional host camera callback.
+    void* virtual_mouse_user{};
+    void (*virtual_mouse_stop)(void*){};
+    void (*virtual_mouse)(void*,gl_output*,bool,uint32_t,uint32_t){};
+    uint64_t steam_mouse_device{}; // session detection, never persisted
     void* camera_user{};
     gl_sample_observer sample_observer{};
     void* sample_observer_user{};
     gl_recenter_callback recenter{};
+    gl_recenter_step_callback recenter_step{};
+    uint64_t recenter_started{},recenter_duration{};
+    double recenter_progress{};
     void* recenter_user{};
     bool recenter_requested{},recenter_held{},recenter_primed{},allow_calibration{true};
     gyrolib::EndpointState* endpoint(uint64_t);

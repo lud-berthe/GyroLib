@@ -139,6 +139,35 @@ SDL can configure hardware while opening/enabling sensors, including mode or lig
 changes. Coexistence with another SDL/HID stack needs a real device/game check.
 If another host reader later acquires a GyroLib-opened handle, coordinate ownership.
 
+### Optional SDL window input
+
+Unreleased: attach the demo/host window once to enable the per-view
+[Steam mouse setting](OVERLAY.md#steam-input-mouse-movement):
+
+```cpp
+int result = gl_sdl_attach_window(reader, sdl_window);
+```
+
+The supplied Windows SDL runtime exposes a per-window input extension. GyroLib
+handles identification, filtering, conversion and cursor confinement inside the
+DLL. The host continues consuming its usual camera/cursor output and SDL events.
+Neither its event filter nor its Windows message hook is replaced. SDL owns raw
+mouse registration while the window is attached, including outside relative mode
+for cursor views. A separate Raw Input owner in the same process needs coordination.
+
+Attach/detach runs on the context-owner/SDL main thread. Raw mouse callbacks run
+on SDL's raw-input thread under a window-property lock; detachment waits for them.
+Movement queues use a separate mutex and are consumed by `gl_update` on the owner
+thread. Buttons and wheel events pass through. Call `gl_sdl_attach_window(reader,
+nullptr)` to detach, or destroy the reader. Destroying the window releases its
+binding automatically. The context must outlive the reader.
+
+One bridge may own a context or window, including the DX12 bridge. The call returns
+`GL_UNAVAILABLE` for an occupied context/window, an external SDL without the
+extension, a non-Windows runtime or SDL's GameInput mouse backend. Ordinary
+controller acquisition remains usable when attachment fails. A non-Steam shortcut
+does not require a Steamworks SDK for this path.
+
 ### Sensor recovery
 
 Direct and isolated readers share a watchdog. After 750 ms without fresh gyro

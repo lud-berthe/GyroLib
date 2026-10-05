@@ -102,7 +102,7 @@
   "mode.hold": "Tieni premuto per attivare",
   "mode.toggle": "Alterna",
   "calibration.action": "Ricalibra giroscopio",
-  "calibration.steamHelp": "Calibra nelle impostazioni controller di Steam.",
+  "calibration.steamHelp": "La calibrazione è gestita da Steam Input.",
   "BlockLongPress": "BLOCCA TENENDO PREMUTO",
   "ui.block_long_press": "Blocca tenendo premuto",
   "description.BlockLongPress": "Una pressione breve attiva l'azione di gioco al rilascio. Tenere premuto controlla solo il giroscopio.",
@@ -317,5 +317,16 @@
   "inherit.view": "Visuale",
   "inherit.help": "Usa le impostazioni di un'altra visuale.",
   "recommended": "Usa impostazioni consigliate",
-  "description.recommended": "Applica le impostazioni consigliate da questa mod."
+  "description.recommended": "Applica le impostazioni consigliate da questa mod.",
+  "RecenterDuration": "DURATA DEL CENTRAGGIO",
+  "description.RecenterDuration": "Tempo per riportare la visuale in orizzontale. A zero è istantaneo.",
+  "ui.advanced.recenter": "Opzioni di centraggio.",
+  "SteamMouse": "MOUSE STEAM INPUT",
+  "description.SteamMouse": "Scegli come usare i movimenti del mouse di Steam Input.",
+  "steam_mouse.pass": "Lascia passare",
+  "steam_mouse.block": "Blocca",
+  "choice.steam_mouse.pass": "Lascia gestire al gioco i movimenti del mouse.",
+  "choice.steam_mouse.block": "Ignora i movimenti del mouse.",
+  "steam_mouse.convert": "Converti movimento",
+  "choice.steam_mouse.convert": "Usa i movimenti del mouse per controllare la vista."
 }

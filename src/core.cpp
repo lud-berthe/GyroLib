@@ -58,6 +58,7 @@ void gl_context::emit(uint32_t type,int detail,uint64_t ep,double value,const ch
 void gl_context::reset_temporal() {
     active=0; controls_primed=false; held_previous=false; previous_frame=0;
     recenter_primed=recenter_requested=false;
+    recenter_started=recenter_duration=0;recenter_progress=0;
     safe_previous=false; flick.reset();flick_touchpad.reset();suppress_touchpad=false; for (auto& g:long_press_blockers) g.cancel();
     gyro_state={};stick_gate.reset();trigger_gate.reset();flick_timelines={};
     modifiers=0;gyro_override=-1;
@@ -199,10 +200,13 @@ int32_t GL_CALL gl_get_input_metrics(const gl_context* c,uint64_t id,gl_input_me
     return GL_OK;
 }
 void GL_CALL gl_set_recenter_callback(gl_context* c,gl_recenter_callback f,void* user) {
-    if(c){c->recenter=f;c->recenter_user=user;c->recenter_primed=c->recenter_requested=false;c->emit(GL_EVENT_CONTEXT);}
+    if(c){c->recenter=f;c->recenter_step=nullptr;c->recenter_user=user;c->recenter_primed=c->recenter_requested=false;c->recenter_duration=0;c->emit(GL_EVENT_CONTEXT);}
+}
+void GL_CALL gl_set_recenter_step_callback(gl_context* c,gl_recenter_step_callback f,void* user) {
+    if(c){c->recenter_step=f;c->recenter=nullptr;c->recenter_user=user;c->recenter_primed=c->recenter_requested=false;c->recenter_duration=0;c->emit(GL_EVENT_CONTEXT);}
 }
 int32_t GL_CALL gl_request_recenter(gl_context* c){
-    if(!c)return GL_INVALID;if(!c->recenter)return GL_UNAVAILABLE;c->recenter_requested=true;return GL_OK;
+    if(!c)return GL_INVALID;if(!c->recenter&&!c->recenter_step)return GL_UNAVAILABLE;c->recenter_requested=true;return GL_OK;
 }
 int32_t GL_CALL gl_set_auto_calibration_allowed(gl_context* c,uint32_t allowed){
     if(!c||allowed>1)return GL_INVALID;c->allow_calibration=allowed!=0;return GL_OK;
@@ -262,6 +266,11 @@ int32_t GL_CALL gl_forget_endpoint(gl_context* c,uint64_t id) {
 uint32_t GL_CALL gl_endpoint_count(const gl_context* c) {return c?static_cast<uint32_t>(c->endpoints.size()):0;}
 uint32_t GL_CALL gl_endpoint_motion_available(const gl_context* c,uint64_t id) {
     const auto* e=c?c->endpoint(id):nullptr;return e&&healthy(*e,c->now);
+}
+int32_t GL_CALL gl_set_endpoint_steam_input(gl_context* c,uint64_t id,uint32_t present) {
+    auto* e=c?c->endpoint(id):nullptr;if(!e||present>1)return GL_INVALID;
+    if(e->steam_input!=(present!=0)){e->steam_input=present!=0;c->emit(GL_EVENT_CONTEXT,6);}
+    return GL_OK;
 }
 int32_t GL_CALL gl_set_endpoint_pairing_hint(gl_context* c,uint64_t id,uint32_t vendor,uint32_t product,uint32_t is_virtual) {
     auto* e=c?c->endpoint(id):nullptr;if(!e||vendor>65535||product>65535||is_virtual>1)return GL_INVALID;
@@ -579,6 +588,7 @@ int32_t GL_CALL gl_update(gl_context* c,uint64_t now,const gl_host_state* host,g
     if(modifiers&GL_MOD_INVERT_Y)output->pitch_degrees=-output->pitch_degrees;
     c->modifiers=0;c->gyro_override=-1;
     for(auto& e:c->endpoints)e.samples.clear(); // never replay alternate-source backlog
+    if(c->virtual_mouse)c->virtual_mouse(c->virtual_mouse_user,output,safe,profile,controls.touchpads);
     if(profile){const auto& view=c->gameplay_contexts.at(profile);
         if(!cursor&&v[ZoomCompensation]&&view.zoom_available&&view.fov_reported){
             const double ratio=std::tan(view.fov*std::numbers::pi/360)/std::tan(view.reference_fov*std::numbers::pi/360);
@@ -589,7 +599,7 @@ int32_t GL_CALL gl_update(gl_context* c,uint64_t now,const gl_host_state* host,g
     c->allow_calibration=true;
     const bool recenter_held=button_matches(controls.buttons,static_cast<int>(v[RecenterButton]));
     if(!safe||profile_changed||!controls_fresh||!c->safe_previous)c->recenter_primed=false;
-    bool recenter=safe&&!cursor&&c->recenter&&(c->recenter_requested||
+    bool recenter=safe&&!cursor&&(c->recenter||c->recenter_step)&&(c->recenter_requested||
         (c->recenter_primed&&recenter_held&&!c->recenter_held));
     c->recenter_requested=false;c->recenter_held=recenter_held;c->recenter_primed=safe&&controls_fresh;
     int flick_mode=static_cast<int>(v[FlickMode]);
@@ -648,7 +658,21 @@ int32_t GL_CALL gl_update(gl_context* c,uint64_t now,const gl_host_state* host,g
         if(published!=GL_OK){*output={};return published;}
     }
     if(!cursor&&c->camera&&(output->yaw_degrees||output->pitch_degrees))c->camera(c->camera_user,output->yaw_degrees,output->pitch_degrees);
-    if(recenter)c->recenter(c->recenter_user);
+    if(!safe||cursor||profile_changed)c->recenter_duration=0;
+    double recenter_fraction=0;
+    if(recenter&&c->recenter_step){
+        c->recenter_started=now;c->recenter_progress=0;
+        c->recenter_duration=static_cast<uint64_t>(v[RecenterMs]*1000000.0);
+        if(!c->recenter_duration)recenter_fraction=1;
+    }
+    if(c->recenter_duration){
+        const double t=std::clamp(double(now-c->recenter_started)/double(c->recenter_duration),0.0,1.0);
+        const double progress=t*t*(3-2*t);
+        recenter_fraction=(progress-c->recenter_progress)/(1-c->recenter_progress);
+        c->recenter_progress=progress;if(t>=1)c->recenter_duration=0;
+    }
+    if(recenter_fraction>0&&c->recenter_step)c->recenter_step(c->recenter_user,recenter_fraction);
+    else if(recenter&&c->recenter)c->recenter(c->recenter_user);
     return GL_OK;
 } catch (...) {if(output)*output={};return GL_LIMIT;}
 int32_t GL_CALL gl_get_diagnostics(const gl_context* c,gl_diagnostics* d) {
@@ -700,6 +724,7 @@ void GL_CALL gl_set_panel_open(gl_context* c,uint32_t open) {if(c){
     const bool changed=c->panel!=(open!=0);c->panel=open!=0;
     if(changed&&open){++c->panel_opening;c->panel_opening_context=c->winning_context();}
     if(open)for(auto& g:c->long_press_blockers)g.cancel();
+    if(changed&&open&&c->virtual_mouse_stop)c->virtual_mouse_stop(c->virtual_mouse_user);
     if(changed&&c->panel_changed)c->panel_changed(c->overlay_user,c->panel);
 }}
 uint32_t GL_CALL gl_panel_open(const gl_context* c) {return c&&c->panel;}
