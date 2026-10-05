@@ -2,6 +2,35 @@
 
 [Documentation](INDEX.md) / Maintenance
 
+## 1.1.0 — 5 October 2026
+
+The DLL-owned DX12 settings panel now supports SDR 10-bit, scRGB and HDR10
+backbuffers. This fixes missing panels on supported non-8-bit swapchains and
+provides color-correct HDR composition.
+
+- Hosts can supply the actual color space or use `GL_OVERLAY_COLOR_SPACE_AUTO`.
+  Automatic detection is a fallback: SDR 10-bit on an HDR desktop can be
+  ambiguous, so a known host encoding takes precedence.
+- HDR UI white level defaults to 203 nits and can be set from 80 to 1000 nits
+  through `gl_overlay_dx12_set_hdr_white_level`.
+- The overlay preserves untouched game pixels and alpha, including extended
+  scRGB values. It does not change the game's HDR settings or display metadata.
+
+Existing 1.0 integrations remain compatible: C/overlay ABI 1, unchanged public
+struct layouts and INI schema 0.2.0. Keep `gyrolib.ini` when replacing the DLL.
+New HDR integrations should require GyroLib 1.1 or later.
+
+Downloads: [1.1.0 release](https://github.com/lud-berthe/GyroLib/releases/tag/v1.1.0)
+provides the SDK, standalone demo, `gyrolib.dll` and `SHA256SUMS.txt`.
+Windows x64 binaries require the Microsoft Visual C++ x64 runtime.
+
+WARP pixel tests cover scRGB/HDR10 blending, luminance, color conversion and
+resource lifecycle. A manual session confirmed panel opening and normal colors
+with a 10-bit SDR backbuffer on a Windows HDR desktop. Native PQ/scRGB output on
+physical displays, Linux and Proton remain unvalidated. See
+[Validation](VALIDATION.md) for the release test matrix and
+[Overlay integration](OVERLAY.md) for supported formats and limits.
+
 ## 1.0.0 — 4 October 2026
 
 First stable GyroLib SDK for Windows x64/MSVC. Mods can use the prebuilt DLL

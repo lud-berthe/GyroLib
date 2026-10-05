@@ -6,6 +6,10 @@ extern "C" {
 #endif
 typedef struct gl_overlay gl_overlay;
 #define GL_OVERLAY_ABI_VERSION 1u
+/* Standard swapchain encodings: RGBA/BGRA8 -> SDR, RGBA16F -> scRGB,
+ * RGB10A2 -> HDR10 on an HDR output, otherwise SDR. If a host uses 10-bit SDR
+ * on an HDR desktop, pass color_space=0 explicitly instead of this heuristic. */
+#define GL_OVERLAY_COLOR_SPACE_AUTO UINT32_MAX
 enum { GL_OVERLAY_CAPTURE_MOUSE=1u, GL_OVERLAY_CAPTURE_KEYBOARD=2u,
        GL_OVERLAY_CAPTURE_GAMEPAD=4u };
 /* Optional Windows DX12 frontend, compiled into the prebuilt DLL. No ImGui/SDL
@@ -33,14 +37,19 @@ GL_API uint32_t GL_CALL gl_overlay_capture(const gl_overlay*);
 /* HWND / IDXGISwapChain3* / ID3D12CommandQueue* (DIRECT, same device).
  * COM references are retained until shutdown. Own heaps, allocators, command
  * lists and fences; never change the host's graphics pipeline/descriptor heaps.
- * Supports 2..8 single-sample buffers: R8G8B8A8_UNORM or B8G8R8A8_UNORM.
- * HDR/color-space conversion is not supported. UINT64 handles are never pointers. */
+ * Supports 2..8 single-sample buffers: SDR RGBA/BGRA8, scRGB RGBA16_FLOAT,
+ * HDR10/SDR RGB10A2_UNORM. AUTO handles conventional encodings; an explicit
+ * space is authoritative. UINT64 handles are never pointers. */
 typedef struct gl_overlay_dx12_desc {
     uint32_t size,abi_version;
-    uint32_t color_space,reserved; /* DXGI_COLOR_SPACE_TYPE, SDR G22/P709=0; reserved=0 */
+    uint32_t color_space,reserved; /* AUTO or DXGI: SDR=0, scRGB=1, HDR10=12; reserved=0 */
     void *window,*swapchain,*command_queue;
 } gl_overlay_dx12_desc;
 GL_API int32_t GL_CALL gl_overlay_dx12_init(gl_overlay*,const gl_overlay_dx12_desc*);
+/* Optional, on the initialized render thread. UI white in cd/m2, 80..1000,
+ * default 203 at every init. Does not alter game brightness or HDR metadata.
+ * SDR returns GL_UNAVAILABLE. Invalid values leave the previous value intact. */
+GL_API int32_t GL_CALL gl_overlay_dx12_set_hdr_white_level(gl_overlay*,float nits);
 /* Call AFTER the game's last backbuffer work is submitted on the SAME queue,
  * BEFORE Present. Current buffer MUST be PRESENT. Transitions it to RT and back.
  * GyroLib does not clear, Present, or resize. delta_seconds >0, <=1; DPI >0.
@@ -50,7 +59,9 @@ GL_API int32_t GL_CALL gl_overlay_dx12_init(gl_overlay*,const gl_overlay_dx12_de
 GL_API int32_t GL_CALL gl_overlay_dx12_render(gl_overlay*,double delta_seconds,float dpi_scale);
 /* Call BEFORE ResizeBuffers: drains our fence and releases backbuffer refs.
  * Next render lazily reacquires buffers; changed count/format requires shutdown
- * and init. On full device replacement, shutdown before releasing host objects. */
+ * and init. A changed explicit color space also requires shutdown/init, even if
+ * format stays the same; AUTO refreshes output changes while open. On full
+ * device replacement, shutdown before releasing host objects. */
 GL_API int32_t GL_CALL gl_overlay_dx12_before_resize(gl_overlay*);
 GL_API int32_t GL_CALL gl_overlay_dx12_shutdown(gl_overlay*);
 /* HWND, Windows message, WPARAM and LPARAM. Fixed-width C ABI, no windows.h

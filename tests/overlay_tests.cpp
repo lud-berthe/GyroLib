@@ -36,12 +36,12 @@ struct Graphics {
     ComPtr<IDXGISwapChain3> swap;ComPtr<ID3D12DescriptorHeap> heap;ComPtr<ID3D12CommandAllocator> allocator;
     ComPtr<ID3D12GraphicsCommandList> list;ComPtr<ID3D12Fence> fence;HANDLE event{};uint64_t value{};
     void drain(){CHECK(SUCCEEDED(queue->Signal(fence.Get(),++value)));CHECK(SUCCEEDED(fence->SetEventOnCompletion(value,event)));CHECK(WaitForSingleObject(event,5000)==WAIT_OBJECT_0);}
-    Graphics(){WNDCLASSW cls{};cls.lpfnWndProc=procedure;cls.hInstance=GetModuleHandleW(nullptr);cls.lpszClassName=L"GyroLibOverlayHiddenTest";RegisterClassW(&cls);
+    Graphics(DXGI_FORMAT format=DXGI_FORMAT_R8G8B8A8_UNORM){WNDCLASSW cls{};cls.lpfnWndProc=procedure;cls.hInstance=GetModuleHandleW(nullptr);cls.lpszClassName=L"GyroLibOverlayHiddenTest";RegisterClassW(&cls);
         window=CreateWindowW(cls.lpszClassName,L"hidden overlay fixture",WS_POPUP,0,0,1024,720,nullptr,nullptr,cls.hInstance,nullptr);CHECK(window);
         CHECK(SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))));ComPtr<IDXGIAdapter> warp;CHECK(SUCCEEDED(factory->EnumWarpAdapter(IID_PPV_ARGS(&warp))));
         CHECK(SUCCEEDED(D3D12CreateDevice(warp.Get(),D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&device))));
         D3D12_COMMAND_QUEUE_DESC q{};q.Type=D3D12_COMMAND_LIST_TYPE_DIRECT;CHECK(SUCCEEDED(device->CreateCommandQueue(&q,IID_PPV_ARGS(&queue))));
-        DXGI_SWAP_CHAIN_DESC1 sc{};sc.Width=1024;sc.Height=720;sc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;sc.SampleDesc.Count=1;sc.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        DXGI_SWAP_CHAIN_DESC1 sc{};sc.Width=1024;sc.Height=720;sc.Format=format;sc.SampleDesc.Count=1;sc.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;
         sc.BufferCount=2;sc.SwapEffect=DXGI_SWAP_EFFECT_FLIP_DISCARD;ComPtr<IDXGISwapChain1> first;
         CHECK(SUCCEEDED(factory->CreateSwapChainForHwnd(queue.Get(),window,&sc,nullptr,nullptr,&first)));CHECK(SUCCEEDED(first.As(&swap)));
         D3D12_DESCRIPTOR_HEAP_DESC hd{};hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;hd.NumDescriptors=1;CHECK(SUCCEEDED(device->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&heap))));
@@ -188,6 +188,33 @@ void opening_view(){
     gl_set_panel_open(c,0);active=1;frame();CHECK(gl_overlay_set_open(o,1)==GL_OK);frame();edit(1);
     CHECK(gl_overlay_detach(o)==GL_OK);render.run([&]{CHECK(gl_overlay_dx12_shutdown(o)==GL_OK);});CHECK(gl_overlay_destroy(o)==GL_OK);gl_destroy(c);
 }
+void hdr_lifecycle(){
+    for(auto format:{DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R10G10B10A2_UNORM}){
+        Graphics g(format);Worker render;auto* c=gl_create(GL_ABI_VERSION);CHECK(c);
+        auto* o=gl_overlay_create(c,GL_OVERLAY_ABI_VERSION);CHECK(o);
+        gl_overlay_dx12_desc desc{sizeof(desc),GL_OVERLAY_ABI_VERSION,format==DXGI_FORMAT_R16G16B16A16_FLOAT?1u:12u,0,g.window,g.swap.Get(),g.queue.Get()};
+        render.run([&]{auto invalid=desc;invalid.color_space=2;CHECK(gl_overlay_dx12_init(o,&invalid)==GL_UNAVAILABLE);
+            CHECK(gl_overlay_dx12_init(o,&desc)==GL_OK);
+            CHECK(gl_overlay_dx12_set_hdr_white_level(o,79)==GL_INVALID);CHECK(gl_overlay_dx12_set_hdr_white_level(o,1001)==GL_INVALID);
+            CHECK(gl_overlay_dx12_set_hdr_white_level(o,NAN)==GL_INVALID);CHECK(gl_overlay_dx12_set_hdr_white_level(o,203)==GL_OK);});
+        CHECK(gl_overlay_dx12_set_hdr_white_level(o,203)==GL_INVALID);
+        render.run([&]{CHECK(gl_overlay_dx12_shutdown(o)==GL_OK);desc.color_space=GL_OVERLAY_COLOR_SPACE_AUTO;
+            CHECK(gl_overlay_dx12_init(o,&desc)==GL_OK);});
+        uint64_t now=1000000000;
+        const auto frame=[&]{CHECK(gl_overlay_process(o)==GL_OK);gl_host_state host{};host.focused=1;gl_output out{};
+            CHECK(gl_update(c,now+=16000000,&host,&out)==GL_OK);
+            render.run([&]{g.clear();CHECK(gl_overlay_dx12_render(o,.016,1)==GL_OK);});};
+        CHECK(gl_overlay_set_open(o,1)==GL_OK);for(int i=0;i<4;++i)frame();
+        render.run([&]{CHECK(gl_overlay_dx12_before_resize(o)==GL_OK);CHECK(SUCCEEDED(g.swap->ResizeBuffers(2,800,600,format,0)));});
+        for(int i=0;i<3;++i)frame();
+        CHECK(gl_overlay_set_open(o,0)==GL_OK);frame();CHECK(gl_overlay_capture(o)==0);
+        CHECK(gl_overlay_set_open(o,1)==GL_OK);frame();
+        // Format/color-space switches reuse the overlay with a new renderer.
+        render.run([&]{CHECK(gl_overlay_dx12_shutdown(o)==GL_OK);CHECK(SUCCEEDED(g.swap->ResizeBuffers(2,1024,720,DXGI_FORMAT_R8G8B8A8_UNORM,0)));
+            desc.color_space=GL_OVERLAY_COLOR_SPACE_AUTO;CHECK(gl_overlay_dx12_init(o,&desc)==GL_OK);CHECK(gl_overlay_dx12_set_hdr_white_level(o,203)==GL_UNAVAILABLE);});
+        frame();CHECK(gl_overlay_detach(o)==GL_OK);render.run([&]{CHECK(gl_overlay_dx12_shutdown(o)==GL_OK);});CHECK(gl_overlay_destroy(o)==GL_OK);gl_destroy(c);
+    }
+}
 int main(int argc,char** argv)try{
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     const bool capture=argc>1&&std::strcmp(argv[1],"--capture")==0;Graphics g;Worker render;
@@ -314,6 +341,6 @@ int main(int argc,char** argv)try{
         CHECK(ImGui::GetCurrentContext()==host_imgui);ImGui::DestroyContext(host_imgui);
 #endif
     });CHECK(gl_overlay_destroy(o)==GL_OK);gl_destroy(c);
-    std::filesystem::remove(settings);fresh_input_options();opening_view();
+    std::filesystem::remove(settings);fresh_input_options();opening_view();hdr_lifecycle();
     std::puts("Autonomous DX12 panel: fresh activators/all gyro spaces, WARP pixels, independent threads, input, resize, gating and lifecycle passed.");return 0;
 }catch(const std::exception& e){std::fprintf(stderr,"%s\n",e.what());return 1;}

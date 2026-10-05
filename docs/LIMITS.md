@@ -12,10 +12,14 @@ not certify every controller, transport or host game.
   focus/pause/menu observations. Calls follow the [owner-thread contract](API.md).
 - Flick needs native camera-input suppression. Long-press blocking needs a
   separate event hook and must not filter aim/Alt-Fire.
-- The built-in renderer supports [Windows DX12 SDR](OVERLAY.md) only. Other renderers
+- The built-in renderer supports [Windows DX12 SDR, scRGB and HDR10](OVERLAY.md). Other renderers
   can use the static panel or native model. Real-game GPU performance is unmeasured.
-- Linux builds/loading, Steam Deck, Wine, Proton, HDR and other game renderers are
-  not validated. The vendored SDL development package is Windows x64.
+- Linux builds/loading, Steam Deck, Wine, Proton and other game renderers are
+  not validated. HDR composition has numeric WARP coverage; the manual HDR
+  desktop session used a 10-bit SDR backbuffer, not native PQ/scRGB output.
+  AUTO cannot distinguish 10-bit SDR from HDR10 solely from an HDR monitor;
+  use the host's known color space when available. The vendored SDL development
+  package is Windows x64.
 - Library translations cover six catalogs; the mod translates its own view labels.
   Six native-speaker reviews have not been performed.
 

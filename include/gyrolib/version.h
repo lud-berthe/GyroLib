@@ -3,9 +3,9 @@
 
 /* Release number: also read by CMake. 0.x.y denotes development releases. */
 #define GL_VERSION_MAJOR 1
-#define GL_VERSION_MINOR 0
+#define GL_VERSION_MINOR 1
 #define GL_VERSION_PATCH 0
-#define GL_VERSION_STRING "1.0.0"
+#define GL_VERSION_STRING "1.1.0"
 
 /* Version which introduced the INI format; not automatically bumped for fixes. */
 #define GL_SETTINGS_SCHEMA "0.2.0"

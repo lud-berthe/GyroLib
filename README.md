@@ -2,12 +2,12 @@
 
 GyroLib is a C++ library for adding controller gyro to game mods. It provides a
 C API and a C++ wrapper, with a core independent of the game engine and renderer.
-Use the prebuilt `gyrolib.dll` or link the library statically into your mod.
+Integrate the supplied `gyrolib.dll` using the SDK headers and examples.
 
-**Version 1.0.0.** Tested on Windows x64/MSVC.
+**Version 1.1.0.** Tested on Windows x64/MSVC.
 Linux and Proton remain unvalidated.
 
-[Download SDK or demo](https://github.com/lud-berthe/GyroLib/releases/tag/v1.0.0)
+[Download DLL, SDK or demo](https://github.com/lud-berthe/GyroLib/releases/tag/v1.1.0)
 · [Release notes](docs/RELEASE_NOTES.md)
 
 ## What GyroLib handles
@@ -20,7 +20,8 @@ Linux and Proton remain unvalidated.
 - **View profiles:** separate settings for cameras and cursors, inheritance
   between views and optional recommended presets supplied by the mod.
 - **Configuration:** saved settings, localized text, an ImGui panel and a shared
-  menu model for native game widgets.
+  menu model for native game widgets. The DX12 overlay supports SDR, scRGB and
+  HDR10 buffers; see [overlay integration](docs/OVERLAY.md) for color-space setup.
 
 ## What the mod connects
 

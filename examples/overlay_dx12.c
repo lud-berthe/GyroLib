@@ -39,8 +39,11 @@ int gyro_mod_update(gyro_mod* mod,uint64_t now,const gl_host_state* state){
 /* Render thread. Objects come from the host renderer, e.g. REFramework's public
  * renderer data. swapchain MUST implement IDXGISwapChain3; do QueryInterface
  * in the host rather than assuming an IDXGISwapChain* has that vtable. */
-int gyro_mod_renderer_ready(gyro_mod* mod,void* hwnd,void* swapchain3,void* direct_queue){
-    const gl_overlay_dx12_desc desc={sizeof(desc),GL_OVERLAY_ABI_VERSION,0,0,hwnd,swapchain3,direct_queue};
+/* Use GL_OVERLAY_COLOR_SPACE_AUTO for standard SDR/HDR swapchains, or the
+ * actual DXGI space known by the host: SDR=0, scRGB=1, HDR10=12.
+ * Reinitialize on format changes or changes to an explicit color space. */
+int gyro_mod_renderer_ready(gyro_mod* mod,void* hwnd,void* swapchain3,void* direct_queue,uint32_t color_space){
+    const gl_overlay_dx12_desc desc={sizeof(desc),GL_OVERLAY_ABI_VERSION,color_space,0,hwnd,swapchain3,direct_queue};
     return gl_overlay_dx12_init(mod->overlay,&desc);
 }
 /* Forward actual Win32 messages; return is a capture mask, not an LRESULT.

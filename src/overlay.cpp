@@ -9,6 +9,7 @@
 #include <windowsx.h>
 #include <dxgi1_4.h>
 #include <wrl/client.h>
+#include "detail/overlay_hdr.hpp"
 #include <atomic>
 #include <chrono>
 #include <memory>
@@ -82,6 +83,8 @@ struct gl_overlay {
     std::vector<Frame> frames;std::vector<unsigned> free_srv;
     HANDLE fence_event{};uint64_t submitted{};UINT rtv_stride{},srv_stride{};DXGI_FORMAT format{};bool backend{};
     uint32_t controls{};float stick_x{},stick_y{};
+    std::unique_ptr<gyrolib_hdr::Composer> hdr;
+    bool automatic_color{};uint32_t color_space{};
 };
 namespace {
 std::mutex registry_mutex;std::set<gl_context*> registered;
@@ -113,7 +116,7 @@ int wait(gl_overlay& o,uint64_t value){
     return GL_OK;
 }
 bool render_thread(gl_overlay* o){return o&&o->render_thread==GetCurrentThreadId();}
-void release_targets(gl_overlay& o){for(auto& f:o.frames)f.buffer.Reset();}
+void release_targets(gl_overlay& o){for(auto& f:o.frames)f.buffer.Reset();if(o.hdr)o.hdr->release_targets();}
 int acquire_targets(gl_overlay& o){
     DXGI_SWAP_CHAIN_DESC1 desc{};if(auto r=hr(o.swapchain->GetDesc1(&desc),"GetDesc1");r)return r;
     if(desc.BufferCount!=o.frames.size()||desc.Format!=o.format||desc.SampleDesc.Count!=1)
@@ -121,6 +124,7 @@ int acquire_targets(gl_overlay& o){
     auto handle=o.rtv->GetCPUDescriptorHandleForHeapStart();
     for(UINT i=0;i<desc.BufferCount;++i){if(auto r=hr(o.swapchain->GetBuffer(i,IID_PPV_ARGS(&o.frames[i].buffer)),"GetBuffer");r){release_targets(o);return r;}
         o.device->CreateRenderTargetView(o.frames[i].buffer.Get(),nullptr,handle);handle.ptr+=o.rtv_stride;}
+    if(o.hdr)if(auto r=hr(o.hdr->resize(o.device.Get(),o.frames[0].buffer->GetDesc()),"HDR render targets");r){release_targets(o);return r;}
     return GL_OK;
 }
 void input(gl_overlay& o,const std::vector<Message>& messages){
@@ -233,11 +237,17 @@ int32_t GL_CALL gl_overlay_dx12_init(gl_overlay* o,const gl_overlay_dx12_desc* d
     ComPtr<ID3D12Device> queue_device;if(auto r=hr(o->queue->GetDevice(IID_PPV_ARGS(&queue_device)),"Queue GetDevice");r)return cleanup(r);
     if(queue_device.Get()!=o->device.Get())return cleanup(fail("Queue/swapchain device mismatch"));
     DXGI_SWAP_CHAIN_DESC1 sc{};if(auto r=hr(o->swapchain->GetDesc1(&sc),"GetDesc1");r)return cleanup(r);
-    const auto color=static_cast<DXGI_COLOR_SPACE_TYPE>(desc->color_space);
+    uint32_t color{};
+    if(auto r=hr(gyrolib_hdr::resolve_space(o->swapchain.Get(),sc.Format,desc->color_space,color),"Read DXGI output color space (host can provide an explicit space)");r)return cleanup(r);
     if(sc.BufferCount<2||sc.BufferCount>8||sc.SampleDesc.Count!=1||
-       (sc.Format!=DXGI_FORMAT_R8G8B8A8_UNORM&&sc.Format!=DXGI_FORMAT_B8G8R8A8_UNORM)||color!=DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709)
-        return cleanup(fail("Only 2..8 single-sample SDR RGBA/BGRA buffers supported",GL_UNAVAILABLE));
+       !gyrolib_hdr::supported(sc.Format,color))
+        return cleanup(fail("Unsupported buffer format/color space; expected SDR, scRGB FP16 or HDR10 PQ with 2..8 single-sample buffers",GL_UNAVAILABLE));
     o->format=sc.Format;o->frames.resize(sc.BufferCount);
+    o->automatic_color=desc->color_space==GL_OVERLAY_COLOR_SPACE_AUTO;o->color_space=color;
+    if(color!=DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709){
+        o->hdr=std::make_unique<gyrolib_hdr::Composer>();
+        if(auto r=hr(o->hdr->init(o->device.Get(),sc.Format,color),"HDR compositor initialization");r)return cleanup(r);
+    }
     D3D12_DESCRIPTOR_HEAP_DESC heap{D3D12_DESCRIPTOR_HEAP_TYPE_RTV,sc.BufferCount,D3D12_DESCRIPTOR_HEAP_FLAG_NONE,0};
     if(auto r=hr(o->device->CreateDescriptorHeap(&heap,IID_PPV_ARGS(&o->rtv)),"RTV heap");r)return cleanup(r);
     heap={D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,64,D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,0};
@@ -257,7 +267,7 @@ int32_t GL_CALL gl_overlay_dx12_init(gl_overlay* o,const gl_overlay_dx12_desc* d
     io.ConfigFlags=ImGuiConfigFlags_NavEnableKeyboard|ImGuiConfigFlags_NavEnableGamepad|ImGuiConfigFlags_NoMouseCursorChange;
     io.Fonts->AddFontDefaultVector();io.BackendPlatformName="gyrolib_win32_forwarded";ImGui::StyleColorsDark();
     ImGui_ImplDX12_InitInfo info{};info.Device=o->device.Get();info.CommandQueue=o->queue.Get();info.NumFramesInFlight=sc.BufferCount;
-    info.RTVFormat=sc.Format;info.SrvDescriptorHeap=o->srv.Get();info.UserData=o;
+    info.RTVFormat=o->hdr?DXGI_FORMAT_R8G8B8A8_UNORM:sc.Format;info.SrvDescriptorHeap=o->srv.Get();info.UserData=o;
     info.SrvDescriptorAllocFn=[](ImGui_ImplDX12_InitInfo* i,D3D12_CPU_DESCRIPTOR_HANDLE* cpu,D3D12_GPU_DESCRIPTOR_HANDLE* gpu){
         auto& p=*static_cast<gl_overlay*>(i->UserData);if(p.free_srv.empty()){*cpu={};*gpu={};return;}
         auto index=p.free_srv.back();p.free_srv.pop_back();*cpu=p.srv->GetCPUDescriptorHandleForHeapStart();cpu->ptr+=size_t(index)*p.srv_stride;
@@ -271,6 +281,18 @@ int32_t GL_CALL gl_overlay_dx12_init(gl_overlay* o,const gl_overlay_dx12_desc* d
 int32_t GL_CALL gl_overlay_dx12_render(gl_overlay* o,double delta,float dpi)try{
     if(!render_thread(o)||!o->ready)return fail("render requires initialized render thread");
     if(!std::isfinite(delta)||delta<=0||delta>1||!std::isfinite(dpi)||dpi<=0)return fail("Invalid frame time/DPI");
+    if(o->automatic_color && o->open){
+        uint32_t color{};
+        if(auto r=hr(gyrolib_hdr::resolve_space(o->swapchain.Get(),o->format,GL_OVERLAY_COLOR_SPACE_AUTO,color),"Refresh DXGI output color space");r)return r;
+        if(color!=o->color_space){
+            // Keep host objects alive while replacing our own renderer state.
+            auto swapchain=o->swapchain;auto queue=o->queue;
+            const gl_overlay_dx12_desc desc{sizeof(desc),GL_OVERLAY_ABI_VERSION,GL_OVERLAY_COLOR_SPACE_AUTO,0,
+                reinterpret_cast<void*>(o->window.load()),swapchain.Get(),queue.Get()};
+            if(auto r=gl_overlay_dx12_shutdown(o);r)return r;
+            if(auto r=gl_overlay_dx12_init(o,&desc);r)return r;
+        }
+    }
     o->rendered_at=ticks();
     ContextScope scope(o->imgui);std::vector<Message> messages;bool reset=false;
     {std::lock_guard lock(o->mutex);if(o->published&&o->published_revision>=o->requested_revision){o->mirror=std::move(o->published);o->mirror_at=o->published_at;}
@@ -296,9 +318,13 @@ int32_t GL_CALL gl_overlay_dx12_render(gl_overlay* o,double delta,float dpi)try{
     ImGui_ImplDX12_NewFrame();ImGui::NewFrame();gl_panel_draw(o->panel,io.DisplaySize.x,io.DisplaySize.y,dpi);
     if(!o->mirror->panel)o->open=false;ImGui::Render();
     D3D12_RESOURCE_BARRIER barrier{};barrier.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;barrier.Transition={frame.buffer.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_PRESENT,D3D12_RESOURCE_STATE_RENDER_TARGET};
-    o->list->ResourceBarrier(1,&barrier);auto target=o->rtv->GetCPUDescriptorHandleForHeapStart();target.ptr+=size_t(index)*o->rtv_stride;
-    o->list->OMSetRenderTargets(1,&target,FALSE,nullptr);ID3D12DescriptorHeap* heaps[]={o->srv.Get()};o->list->SetDescriptorHeaps(1,heaps);
-    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(),o->list.Get());std::swap(barrier.Transition.StateBefore,barrier.Transition.StateAfter);o->list->ResourceBarrier(1,&barrier);
+    auto target=o->rtv->GetCPUDescriptorHandleForHeapStart();target.ptr+=size_t(index)*o->rtv_stride;
+    if(o->hdr)o->hdr->begin(o->list.Get(),frame.buffer.Get());
+    else{o->list->ResourceBarrier(1,&barrier);o->list->OMSetRenderTargets(1,&target,FALSE,nullptr);}
+    ID3D12DescriptorHeap* heaps[]={o->srv.Get()};o->list->SetDescriptorHeaps(1,heaps);
+    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(),o->list.Get());
+    if(o->hdr)o->hdr->finish(o->list.Get(),frame.buffer.Get(),target);
+    else{std::swap(barrier.Transition.StateBefore,barrier.Transition.StateAfter);o->list->ResourceBarrier(1,&barrier);}
     if(auto r=hr(o->list->Close(),"Close overlay list");r)return r;ID3D12CommandList* lists[]={o->list.Get()};o->queue->ExecuteCommandLists(1,lists);
     frame.fence=++o->submitted;if(auto r=hr(o->queue->Signal(o->fence.Get(),frame.fence),"Signal overlay fence");r)return r;
     return GL_OK;
@@ -307,6 +333,12 @@ int32_t GL_CALL gl_overlay_dx12_before_resize(gl_overlay* o){
     if(!render_thread(o)||!o->ready)return fail("before_resize requires render thread");
     if(auto r=wait(*o,o->submitted);r)return r;release_targets(*o);return GL_OK;
 }
+int32_t GL_CALL gl_overlay_dx12_set_hdr_white_level(gl_overlay* o,float nits){
+    if(!render_thread(o)||!o->ready)return fail("HDR white level requires initialized render thread");
+    if(!std::isfinite(nits)||nits<80||nits>1000)return fail("HDR white level must be 80..1000 nits");
+    if(!o->hdr)return fail("HDR white level requires an HDR renderer",GL_UNAVAILABLE);
+    o->hdr->white_nits=nits;return GL_OK;
+}
 int32_t GL_CALL gl_overlay_dx12_shutdown(gl_overlay* o)try{
     if(!o)return GL_OK;if(o->render_thread&& !render_thread(o))return fail("shutdown requires render thread");
     o->ready=false;int result=GL_OK;if(o->fence&&o->submitted)result=wait(*o,o->submitted);
@@ -314,7 +346,7 @@ int32_t GL_CALL gl_overlay_dx12_shutdown(gl_overlay* o)try{
     if(o->imgui){ContextScope scope(o->imgui);if(o->backend)ImGui_ImplDX12_Shutdown();gl_panel_destroy(o->panel);o->panel=nullptr;
         if(scope.previous==o->imgui)scope.previous=nullptr;
         ImGui::DestroyContext(o->imgui);o->imgui=nullptr;}
-    o->backend=false;o->frames.clear();o->list.Reset();o->rtv.Reset();o->srv.Reset();o->queue.Reset();o->swapchain.Reset();o->device.Reset();o->fence.Reset();
+    o->hdr.reset();o->backend=false;o->frames.clear();o->list.Reset();o->rtv.Reset();o->srv.Reset();o->queue.Reset();o->swapchain.Reset();o->device.Reset();o->fence.Reset();
     if(o->fence_event)CloseHandle(o->fence_event);o->fence_event=nullptr;o->free_srv.clear();o->submitted=0;o->window=0;o->render_thread=0;o->rendered_at=0;return result;
 }catch(...){return fail("Cannot shut down overlay",GL_LIMIT);}
 }

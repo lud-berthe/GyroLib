@@ -7,7 +7,7 @@ Include `gyrolib/overlay.h`; the mod does not build ImGui or supply an ImGui
 context. This frontend and the static panel use the same widgets and settings.
 
 ```cmake
-find_package(GyroLib 1.0 CONFIG REQUIRED COMPONENTS Core Overlay)
+find_package(GyroLib 1.1 CONFIG REQUIRED COMPONENTS Core Overlay)
 target_link_libraries(my_mod PRIVATE GyroLib::gyrolib)
 ```
 
@@ -36,8 +36,9 @@ to a context. Other core API calls retain their owner-thread requirement.
 
 Supply the HWND, an `IDXGISwapChain3` pointer and its DIRECT `ID3D12CommandQueue`,
 all from the same device. Use QueryInterface for an older swapchain; a cast does
-not upgrade its interface. Fill descriptor size/ABI, actual SDR color space 0
-and reserved 0. The backend retains COM references until shutdown.
+not upgrade its interface. Fill descriptor size/ABI, `GL_OVERLAY_COLOR_SPACE_AUTO`
+(or an explicit color space, see below) and reserved 0. The backend retains COM
+references until shutdown.
 
 Each frame, submit game backbuffer work on that queue, return the backbuffer to
 PRESENT state and call `gl_overlay_dx12_render(overlay, dt_seconds, dpi_scale)`
@@ -67,6 +68,9 @@ Before ResizeBuffers, call `gl_overlay_dx12_before_resize` on the render thread.
 Proceed only after success: it waits for the fence and releases backbuffers.
 The next render reacquires them. Changed buffer count/format or device replacement
 requires shutdown and reinitialization before old renderer objects are released.
+With an explicit color space, reinitialize when it changes, even if the pixel
+format stays the same. AUTO refreshes the output while the panel is open and
+recreates its renderer if its SDR/HDR decision changes.
 
 To shut down:
 
@@ -86,10 +90,46 @@ cannot retain gameplay capture indefinitely.
 
 ## Supported rendering configuration
 
-The backend supports Windows DX12, 2–8 single-sample buffers, R8G8B8A8_UNORM or
-B8G8R8A8_UNORM, and SDR G22/P709. It neither detects nor converts HDR. Zero-sized
-client areas do not draw. DX11, Vulkan, OpenGL and Linux/Proton backends are not
-provided.
+The backend supports Windows DX12 with 2–8 single-sample buffers:
+
+| Output | Backbuffer format | `color_space` (DXGI) |
+|---|---|---|
+| SDR | `R8G8B8A8_UNORM`, `B8G8R8A8_UNORM` or `R10G10B10A2_UNORM` | 0 — RGB full G22/P709 |
+| scRGB | `R16G16B16A16_FLOAT` | 1 — RGB full G10/P709 |
+| HDR10 | `R10G10B10A2_UNORM` | 12 — RGB full G2084/P2020 |
+
+AUTO uses standard format conventions: 8-bit buffers use SDR, FP16 uses scRGB,
+and RGB10 uses HDR10 when DXGI reports an HDR output, otherwise SDR. This avoids
+needing game-specific HDR flags for conventional swapchains.
+For hybrid adapters or WARP, it can locate the physical output from the host
+window. If no Advanced Color output is available, RGB10 falls back to SDR.
+
+This is a heuristic, not a query of the swapchain's current encoding: DXGI has
+no getter for that value. In particular, a game can render 10-bit SDR on an HDR
+desktop. In that case pass 0 explicitly, or report the space known by the host
+renderer/`SetColorSpace1`. Explicit values always override AUTO. No swapchain
+color space, HDR metadata or Windows display setting is changed by GyroLib.
+
+In HDR, the panel renders to a transparent SDR texture, then blends with a copy
+of the scene in linear light. HDR10 includes sRGB decoding, Rec.709-to-Rec.2020
+conversion and PQ encoding. scRGB preserves extended and negative scene values.
+Pixels outside the panel are untouched, including the backbuffer alpha.
+
+UI white defaults to **203 nits**. A host can match its own UI brightness with
+`gl_overlay_dx12_set_hdr_white_level(overlay, nits)` on the render thread after
+initialization (80–1000 nits). The value resets on reinitialization and changes
+only GyroLib's UI. SDR returns `GL_UNAVAILABLE`.
+
+HDR uses two additional full-resolution textures and a composition pass while
+the panel is open. Resizing releases and recreates those textures. Closed panels
+submit no work. Numeric colors and transitions are tested on WARP. A manual
+session confirmed opening and colors for 10-bit SDR on an HDR desktop, using
+the host's explicit space. Native PQ/scRGB display appearance, Auto HDR and
+third-party HDR injection are not validated. See Microsoft's [Advanced Color guidance](https://learn.microsoft.com/en-us/windows/win32/direct3darticles/high-dynamic-range)
+for the swapchain and luminance conventions.
+
+Zero-sized client areas do not draw. DX11, Vulkan, OpenGL and Linux/Proton
+backends are not provided.
 
 Only one overlay GPU submission is outstanding at a time; the next open-panel
 render waits for its fence. This protects buffer/font texture reuse but can add

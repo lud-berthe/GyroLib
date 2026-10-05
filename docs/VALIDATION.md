@@ -8,27 +8,40 @@ new game's hook correctness or input-to-photon latency.
 
 ## Latest SDK results
 
-The **1.0.0 release build**, 4 October 2026, Windows x64/MSVC Release, was
-compiled in fresh build directories and checked against separate installed SDKs:
+The **1.1.0 release**, 5 October 2026, passes the fresh Windows x64/MSVC Release
+matrix below. The additional WARP test reads back scRGB and HDR10 pixels at
+80, 203 and 1000 nits, checks linear alpha composition, Rec.2020 conversion,
+negative/extended scRGB values, unchanged transparent pixels and alpha, target
+resizing and repeated frames. The public overlay tests also exercise HDR
+initialization, invalid format/space pairs and white levels, resize, close/reopen
+and HDR-to-SDR reinitialization. The C integration example compiles in both
+DLL and static configurations. A manual
+session confirmed panel opening and normal colors with a 10-bit SDR backbuffer
+on a Windows HDR desktop. The host reported DXGI color space 0; treating that
+buffer as PQ had produced desaturated UI colors. Native PQ/scRGB presentation
+on physical displays remains unvalidated.
+
+Each variant was compiled in a fresh directory and checked against a separate
+installed SDK:
 
 | Configuration | Result |
 |---|---:|
-| Bundled DLL, SDL, panels and demo | 46/46 |
-| Full static build | 46/46 |
+| Bundled DLL, SDL, panels and demo | 47/47 |
+| Full static build | 47/47 |
 | Static core without SDL/UI | 20/20 |
 | Installed full SDK consumers, DLL and static | 4/4 + 4/4 |
 | Installed core SDK consumers | 2/2 |
 | Review E–F regressions against installed DLL/core SDKs | 7/7 + 6/6 |
-| Total | **135/135** |
+| Total | **137/137** |
 
 The table counts CTest executions across configurations, not distinct bugs or
 hardware sessions. The [audit report](SDK_AUDIT.md) records the findings, fixes,
-artifact hashes and earlier matrices. Documentation edits do not constitute a
-new runtime validation.
+artifact hashes and earlier matrices. The 1.0.0 matrix passed 135/135 executions;
+1.1.0 adds HDR pixel validation to both full builds.
 
 The installed demo also passed its scripted smoke run. The desktop-shell sensor
 reader passed the real shell-launch/handshake/shutdown distribution check, and
-the quickstart compiled against the installed 1.0 SDK. These are software and
+the quickstart compiled against the installed 1.1 SDK. These are software and
 deployment checks; the hardware observations below were not repeated for this
 release preparation.
 
