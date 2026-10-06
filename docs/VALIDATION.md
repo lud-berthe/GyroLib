@@ -8,6 +8,18 @@ new game's hook correctness or input-to-photon latency.
 
 ## Latest SDK results
 
+Release **1.2.2**, 6 October 2026: **53/53** bundled DLL, **53/53** full-static
+and **21/21** core-static tests pass. Installed consumers and SDK regressions
+pass **23/23** checks, plus the demo smoke test and quickstart build.
+The user confirmed that Steam virtual mouse Block works from a fresh demo
+launch without first opening F10. SDL's one-pixel center confinement could
+prevent the injected-motion messages needed to corroborate anonymous raw input;
+attached windows now retain relative motion with window-wide confinement.
+Explicit host mouse rectangles and physical HID exclusions are unchanged.
+The demo also owns system-cursor visibility during gameplay and menus.
+This live confirmation covers the reported startup problem, not every Steam
+mapping or Windows input source.
+
 Release **1.2.1**, 6 October 2026: **53/53** bundled DLL, **53/53** full-static
 and **21/21** core-static tests pass. Installed consumers and SDK regressions
 pass **23/23** checks; the installed demo and quickstart build pass too. A Steam-managed controller no longer needs touchpad hardware or contact

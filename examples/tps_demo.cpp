@@ -108,7 +108,8 @@ int main(int argc,char** argv){
     }
     auto* panel=gl_panel_create(context.get(),nullptr);if(!panel)return 2;
     IMGUI_CHECKVERSION();ImGui::CreateContext();auto& io=ImGui::GetIO();io.IniFilename=nullptr;io.Fonts->AddFontDefaultVector();
-    io.ConfigFlags|=ImGuiConfigFlags_NavEnableKeyboard|ImGuiConfigFlags_NavEnableGamepad;
+    // The demo owns OS cursor visibility; ImGui must not restore it during gameplay.
+    io.ConfigFlags|=ImGuiConfigFlags_NavEnableKeyboard|ImGuiConfigFlags_NavEnableGamepad|ImGuiConfigFlags_NoMouseCursorChange;
     ImGui::StyleColorsDark();ImGui_ImplSDL3_InitForSDLRenderer(window,renderer);ImGui_ImplSDLRenderer3_Init(renderer);demo_ui_gamepad(nullptr);
     std::array<bool,SDL_SCANCODE_COUNT> keys{};bool mouse_aim=false,mouse_fire=false,running=true,relative=false,cursor_hidden=false;
     bool previous_fire=false;SDL_JoystickID previous_pad=0;
@@ -221,7 +222,7 @@ int main(int argc,char** argv){
         }
         const bool wants_relative=!scripted&&input.focused&&!host.inventory&&!host.paused&&!gl_panel_open(context.get());
         if(wants_relative!=relative){SDL_SetWindowRelativeMouseMode(window,wants_relative);relative=wants_relative;}
-        const bool hide_cursor=!scripted&&input.focused&&host.inventory&&!gl_panel_open(context.get());
+        const bool hide_cursor=!scripted&&input.focused&&!host.paused&&!gl_panel_open(context.get());
         if(cursor_hidden!=hide_cursor){if(hide_cursor)SDL_HideCursor();else SDL_ShowCursor();cursor_hidden=hide_cursor;}
         demo_ui_gamepad(pad);
         SDL_SetRenderDrawColor(renderer,11,20,31,255);SDL_RenderClear(renderer);

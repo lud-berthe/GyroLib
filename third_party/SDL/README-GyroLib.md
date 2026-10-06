@@ -28,7 +28,11 @@ then applies the retained patches in order:
    host's event filter and message hook in place. The callback's property lock
    synchronizes detachment with SDL's raw-input thread. Attached windows keep SDL
    Raw Input active for cursor views too; regular SDL mouse delivery still follows
-   SDL's relative-mode state. The private contract is `gyrolib_mouse.h` (MIT).
+   SDL's relative-mode state. Attached windows use window-wide confinement in
+   relative mode instead of SDL's one-pixel center lock, so injected mouse
+   movement can be identified before any menu opens. Explicit host mouse
+   rectangles are retained; detachment restores SDL's usual center-lock policy.
+   The private contract is `gyrolib_mouse.h` (MIT).
 
 The two physical-origin patches add **descriptive joystick properties**, not packet decoders
 or controller configuration writes. Their helper is `gyrolib_controls.h` (MIT).

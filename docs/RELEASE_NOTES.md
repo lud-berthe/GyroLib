@@ -2,6 +2,22 @@
 
 [Documentation](INDEX.md) / Maintenance
 
+## 1.2.2 — 6 October 2026
+
+Fixes Steam Input mouse blocking not taking effect until the settings panel had been opened in an SDL host using relative mouse mode.
+
+- The bundled SDL window bridge now allows injected mouse motion to be identified from startup, without opening F10 first. It keeps the cursor confined to the window and preserves explicit host mouse rectangles.
+- Physical mouse input still passes through. The stream-identification checks remain in place.
+- The demo hides the system cursor during gameplay and uses its own inventory cursor. The settings and pause menus retain the system cursor.
+
+The user confirmed that Block works on a fresh demo launch through Steam without opening F10. Automated validation covers the three build variants, installed SDK consumers, input routing, the SDL bridge and the demo. See [validation](https://github.com/lud-berthe/GyroLib/blob/v1.2.2/docs/VALIDATION.md).
+
+### Update
+
+Close the host and replace `gyrolib.dll`; keep `gyrolib.ini` and the license notices. No mod-side code change is required for this fix. Public APIs, ABI 1 and INI schema 0.2.0 are unchanged. Download the updated demo archive to get its cursor-visibility change as well.
+
+The release provides the DLL alone, SDK, demo and SHA-256 checksums. Windows x64; Linux and Proton remain unvalidated.
+
 ## 1.2.1 — 6 October 2026
 
 Fixes Steam Input mouse routing being restricted to touchpad contact.

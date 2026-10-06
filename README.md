@@ -4,10 +4,10 @@ GyroLib is a C++ library for adding controller gyro to game mods. It provides a
 C API and a C++ wrapper, with a core independent of the game engine and renderer.
 Integrate the supplied `gyrolib.dll` using the SDK headers and examples.
 
-**Version 1.2.1.** Tested on Windows x64/MSVC.
+**Version 1.2.2.** Tested on Windows x64/MSVC.
 Linux and Proton remain unvalidated.
 
-[Download DLL, SDK or demo](https://github.com/lud-berthe/GyroLib/releases/tag/v1.2.1)
+[Download DLL, SDK or demo](https://github.com/lud-berthe/GyroLib/releases/tag/v1.2.2)
 · [Release notes](docs/RELEASE_NOTES.md)
 
 ## What GyroLib handles
