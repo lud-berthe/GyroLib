@@ -64,9 +64,10 @@ navigation uses the selected controller's acquired state.
 
 ## Steam Input mouse movement
 
-Since 1.2.0, `context.<id>.input.steam_mouse` appears last in each view as soon as
-the Windows bridge is attached and the selected controller is identified through
-Steam Input with a right or single touchpad. No mouse movement is required to
+`context.<id>.input.steam_mouse`, introduced in 1.2.0, appears last in each view
+when the Windows bridge is attached and the selected controller is identified
+through Steam Input. Version 1.2.1 removes the touchpad
+requirement: no touchpad capability, contact or mouse movement is needed to
 configure it. SDL supplies this identity from its Steam handle; a generic virtual
 controller or a commercial name does not qualify. A custom acquisition adapter
 can report the same proven metadata with `gl_set_endpoint_steam_input`.
@@ -99,8 +100,10 @@ of the renderer or settings frontend, including a non-Steam shortcut. See
 not attach either input bridge.
 
 Detection correlates at least three relative raw movements without a device
-handle, injected mouse messages and a fresh contact on the selected controller's
-right or single touchpad. It runs in all three modes and while the panel is open.
+handle and injected mouse messages while the selected controller has Steam Input
+metadata. The originating binding may be a stick, touchpad, gyro or another mouse
+mapping. Without Steam metadata, a right/single-pad contact remains a fallback
+for confirming the previously tested touchpad path. It runs in all three modes and while the panel is open.
 Before confirmation, movement passes through. Interception confirmation is
 separate from early menu visibility and is remembered for the current device
 selection, then cleared when it changes or disconnects. It is not saved in the
@@ -109,28 +112,33 @@ Steam metadata is unavailable.
 
 The public metadata identifies Steam Input availability, not the complete legacy
 mouse mapping. The setting is therefore offered on compatible Steam-managed
-controllers even if their pad is not currently assigned to mouse. Neither the
+controllers even if no control is currently assigned to mouse. Neither the
 UI nor the first capture needs a movement to set its policy; only interception
 waits for correlated input. See [SDL's Steam handle](https://wiki.libsdl.org/SDL3/SDL_GetGamepadSteamHandle)
 and [Steam's action-based API](https://partner.steamgames.com/doc/api/ISteamInput).
 
 Windows provides no Steam-specific identity on these messages. A device-less
-packet or injected origin alone is insufficient; another injector active during
-pad contact can still match. Ordinary physical mice retain their input. This
-version targets the touchpad-to-mouse mapping tested on Windows, not arbitrary
-controller mappings or Linux/Proton. It is separate from the Steam Input **gyro
-sensor fallback** and never reinterprets mouse deltas as sensor measurements.
+packet or injected origin alone is insufficient; another injector active while
+Steam Input is available can still match. Ordinary physical HID mice retain
+their input. The touchpad mapping has been tested on Windows. Automated tests cover
+contact-free relative mouse routing; a user also confirmed the contact-free
+route in a game. This does not validate every Steam mapping. Linux/Proton are not
+validated. This is separate from the Steam Input **gyro sensor fallback** and never reinterprets mouse deltas as sensor measurements.
 
 Conversion uses 0.05 degrees per count, right-positive yaw and up-positive pitch,
 plus the view's optional FOV compensation. Gyro sensitivity, smoothing and
-calibration do not apply to mouse counts. Touchpad Flick Stick takes priority:
-Block/Convert movement consume the mouse path without adding a second pad rotation.
-The real gyro continues normally. Buttons and wheel packets pass through.
+calibration do not apply to mouse counts. Windows merges the virtual mouse
+stream: GyroLib cannot determine which Steam binding produced an individual
+movement. Flick Stick therefore does not disable conversion of the stream.
+Avoid mapping the same input to both native GyroLib motion and Steam mouse
+conversion: for example, touchpad flick plus touchpad-to-mouse, or GyroLib gyro
+plus Steam gyro-to-mouse. Block suppresses matching mouse motion while preserving
+GyroLib motion. Buttons and wheel packets pass through.
 
 Pause, loss of focus, an unavailable output destination or the library panel
 suspend interception. Camera-enabled game menus follow their view's setting.
 Cursor confinement applies only in gameplay camera views for Block/Convert
-movement. It ends on physical-mouse activity, menus, F10, Alt-Tab and shutdown,
+movement. It ends on inactivity, physical-mouse activity, menus, F10, Alt-Tab and shutdown,
 restoring the previous host restriction only if it has not changed meanwhile.
 The cursor can still move within the game window. A 250 ms physical-mouse
 preference prevents immediate confinement from residual touchpad inertia.

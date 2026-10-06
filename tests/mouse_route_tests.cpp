@@ -41,8 +41,8 @@ int main()try{
 
     using gyrolib_detail::MouseRoute;
     MouseRoute route;double yaw=0,pitch=0;
-    auto update=[&](uint64_t t,uint32_t mode=1,bool safe=true,uint32_t view=1,uint64_t device=1,bool touch=true,bool observe=true,bool conversion=true){
-        route.consume(t,safe,view,device,touch,mode,observe,conversion,yaw,pitch);
+    auto update=[&](uint64_t t,uint32_t mode=1,bool safe=true,uint32_t view=1,uint64_t device=1,bool touch=true,bool observe=true,bool steam_source=false){
+        route.consume(t,safe,view,device,touch,mode,observe,steam_source,yaw,pitch);
     };
     update(100);
     CHECK(!route.raw(101,65763,false,0,20,-10));
@@ -65,14 +65,39 @@ int main()try{
     CHECK(!route.raw(421,0,false,0,8193,0));
     CHECK(route.raw(421,0,false,0,20,0));update(430,2,true,1,2);near(yaw,3);CHECK(!route.detected);
     CHECK(!route.injected(431));CHECK(!route.raw(432,0,false,0,20,0));CHECK(!route.raw(433,0,false,0,20,0));
-    CHECK(route.raw(434,0,false,0,20,0));update(440,2,true,1,2,true,true,false);near(yaw,3); // touchpad flick wins
-    CHECK(route.raw(441,0,false,0,20,0));update(450,2,true,1,2,true,true,false);near(yaw,3);
+    CHECK(route.raw(434,0,false,0,20,0));update(440,2,true,1,2,true,true,false);near(yaw,4);
+    CHECK(route.raw(441,0,false,0,20,0));update(450,2,true,1,2,true,true,false);near(yaw,5);
     update(460,2,true,1,2,true,false);CHECK(!route.raw(461,0,false,0,20,0)); // focus loss
-    MouseRoute no_contact;no_contact.consume(100,true,1,1,false,2,true,true,yaw,pitch);
+    MouseRoute no_contact;no_contact.consume(100,true,1,1,false,2,true,false,yaw,pitch);
     CHECK(!no_contact.injected(101));for(int i=0;i<5;++i)CHECK(!no_contact.raw(102+i,0,false,0,1,1));CHECK(!no_contact.detected);
-    MouseRoute uncorrelated;uncorrelated.consume(100,true,1,1,true,1,true,true,yaw,pitch);
-    CHECK(!uncorrelated.injected(101));uncorrelated.consume(300,true,1,1,true,1,true,true,yaw,pitch);
+    MouseRoute uncorrelated;uncorrelated.consume(100,true,1,1,true,1,true,false,yaw,pitch);
+    CHECK(!uncorrelated.injected(101));uncorrelated.consume(300,true,1,1,true,1,true,false,yaw,pitch);
     for(int i=0;i<4;++i)CHECK(!uncorrelated.raw(301+i,0,false,0,1,1));CHECK(!uncorrelated.detected);
+
+    // Steam joystick/gyro/button mouse mappings have no pad-contact signal.
+    // Corroborate their stream, release cursor confinement on inactivity, and
+    // resume without ever touching a pad. All policies keep physical HID input.
+    for(uint32_t mode:{0u,1u,2u}){
+        MouseRoute generic;double y=0,p=0;
+        generic.consume(100,true,1,7,false,mode,true,true,y,p);
+        CHECK(!generic.injected(101));
+        CHECK(!generic.raw(102,0,false,0,20,-10));
+        CHECK(!generic.raw(103,0,false,0,20,-10));
+        CHECK(generic.raw(104,0,false,0,20,-10)==(mode!=0));
+        CHECK(generic.detected);
+        CHECK(!generic.raw(105,9876,false,0,20,-10));
+        CHECK(!generic.raw(105,0,false,1,20,-10));
+        generic.consume(110,true,1,7,false,mode,true,true,y,p);
+        near(y,mode==2?1:0);near(p,mode==2?.5:0);
+        generic.consume(300,true,1,7,false,mode,true,true,y,p);
+        CHECK(!generic.active(301)); // no desktop confinement while idle
+        CHECK(generic.raw(302,0,false,0,20,-10)==(mode!=0));
+        CHECK(generic.active(303)==(mode!=0));
+        generic.consume(310,true,1,7,false,mode,true,true,y,p);
+        near(y,mode==2?2:0);
+        generic.consume(320,true,1,8,false,mode,true,true,y,p);
+        CHECK(!generic.detected);CHECK(!generic.raw(321,0,false,0,20,0));
+    }
 
     auto* c=gl_create(GL_ABI_VERSION);CHECK(c);
     struct State {MouseRoute route;gl_context* context{};uint64_t now=1000;double callback_yaw{},callback_pitch{};} state;
@@ -80,7 +105,7 @@ int main()try{
     c->virtual_mouse=[](void* p,gl_output* output,bool safe,uint32_t view,uint32_t contacts){
         auto& s=*static_cast<State*>(p);auto* c=s.context;double mode=1;const auto key="context."+std::to_string(view)+".input.steam_mouse";gl_setting_get_effective(c,key.c_str(),&mode);
         s.route.consume(s.now,safe,view,c->selected,contacts&GL_RIGHT,static_cast<uint32_t>(mode),
-            c->host.focused,true,output->yaw_degrees,output->pitch_degrees);
+            c->host.focused,c->steam_input_available(),output->yaw_degrees,output->pitch_degrees);
         c->steam_mouse_device=s.route.detected?c->selected:0;
     };
     gl_set_camera_callback(c,[](void* p,double y,double x){auto& s=*static_cast<State*>(p);s.callback_yaw+=y;s.callback_pitch+=x;},&state);
@@ -96,7 +121,7 @@ int main()try{
     uint32_t view=1;
     auto tick=[&]{state.now+=10;const auto ns=state.now*1000000;
         gl_sample sample{ns,ns,{0,-100,0},{0,1,0}};CHECK(gl_submit_sample(c,1,&sample)==GL_OK);
-        gl_controls controls{};controls.timestamp_ns=ns;controls.touchpads=GL_RIGHT;CHECK(gl_submit_controls(c,1,&controls)==GL_OK);
+        gl_controls controls{};controls.timestamp_ns=ns;controls.touchpads=ep.caps.touchpads;CHECK(gl_submit_controls(c,1,&controls)==GL_OK);
         for(uint32_t id:{1,2})gl_set_gameplay_context_state(c,id,id==view,1);
         CHECK(gl_update(c,ns,&host,&output)==GL_OK);
     };
@@ -124,6 +149,14 @@ int main()try{
     near(output.yaw_degrees,2);near(output.pitch_degrees,.5);near(state.callback_yaw,2);near(state.callback_pitch,.5);
     tick();near(output.yaw_degrees,1);
     set(key,0);tick();CHECK(!state.route.raw(state.now+1,0,false,0,20,0));tick();near(output.yaw_degrees,1);
+    // A Steam-managed controller needs neither touchpad hardware nor contact.
+    ep.caps.touchpads=0;CHECK(gl_register_endpoint(c,&ep)==GL_OK);
+    CHECK(gl_set_endpoint_steam_input(c,1,1)==GL_OK);CHECK(c->steam_input_available());CHECK(metadata().visible);
+    // Flick on another input must not discard this indistinguishable mouse stream.
+    set("context.1.flick.mode",GL_FLICK_TOUCHPAD);
+    set(key,2);tick();CHECK(state.route.raw(state.now+1,0,false,0,20,-10));tick();
+    near(output.yaw_degrees,2);near(output.pitch_degrees,.5);
+    set("context.1.flick.mode",GL_FLICK_OFF);
     // Inheritance, explicit override, reset and save/load all use the shared model.
     set(key,2);CHECK(gl_set_context_parent(c,2,1)==GL_OK);near(get("context.2.input.steam_mouse"),2);
     set("context.2.input.steam_mouse",0);near(get(key),2);near(get("context.2.input.steam_mouse"),0);

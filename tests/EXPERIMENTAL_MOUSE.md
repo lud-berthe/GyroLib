@@ -6,6 +6,11 @@ message path used by the per-view Steam Input mouse setting. The implementation 
 routing follows `input.steam_mouse` in regular overlay builds too. The old
 `gyrolib-mouse-route.enable` marker is no longer read. The optional recorder is excluded from release binaries.
 
+Version 1.2.1 also accepts Steam-managed mouse mappings without
+pad contact or touchpad hardware. Automated routing tests cover pass/block/convert,
+physical HID exclusion, inactivity and reconnection. The user confirmed the generalized route in game. The touchpad restriction
+described below belongs to the prototype.
+
 The remaining sections record the earlier prototype procedure and its evidence;
 the enable marker and fixed routing mode described there are historical.
 

@@ -173,6 +173,13 @@ struct gl_context {
     void (*virtual_mouse_stop)(void*){};
     void (*virtual_mouse)(void*,gl_output*,bool,uint32_t,uint32_t){};
     uint64_t steam_mouse_device{}; // session detection, never persisted
+    bool steam_input_available() const {
+        if(!selected)return false;
+        for(const auto& e:endpoints)
+            if(e.info.connected && e.info.physical_id==selected &&
+                (e.steam_input || e.info.source==GL_SOURCE_STEAM))return true;
+        return false;
+    }
     void* camera_user{};
     gl_sample_observer sample_observer{};
     void* sample_observer_user{};

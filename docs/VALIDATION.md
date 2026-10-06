@@ -8,6 +8,16 @@ new game's hook correctness or input-to-photon latency.
 
 ## Latest SDK results
 
+Release **1.2.1**, 6 October 2026: **53/53** bundled DLL, **53/53** full-static
+and **21/21** core-static tests pass. Installed consumers and SDK regressions
+pass **23/23** checks; the installed demo and quickstart build pass too. A Steam-managed controller no longer needs touchpad hardware or contact
+for relative mouse routing. Tests cover all three policies without contact,
+physical HID exclusion, inactivity, device changes and setting visibility on a
+controller without touchpads. Flick Stick no longer disables conversion of the
+shared mouse stream. The user confirmed the generalized route in a Windows game. Controller model
+and exact mapping were not recorded for that confirmation; it is not a
+validation of every Steam binding.
+
 The **1.2.0 release**, 5 October 2026, passes **53/53** bundled DLL tests,
 **53/53** full-static tests and **21/21** core-static tests on Windows x64/MSVC.
 Installed consumers and SDK regressions add **23/23** passing checks across

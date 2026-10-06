@@ -53,16 +53,16 @@ void apply_mouse(void* user,gl_output* output,bool safe,uint32_t view,uint32_t c
 #ifdef GL_EXPERIMENTAL_MOUSE_PROBE
     o->mouse_probe.configure(c->settings_path);
 #endif
-    const auto caps=c->capabilities();const auto values=c->device_settings(view);
+    const auto values=c->device_settings(view);
     const bool attached=o->window.load()!=nullptr;
-    const bool observe=attached&&c->host.focused&&c->selected&&(caps.touchpads&(GL_RIGHT|GL_SINGLE));
-    const bool conversion=values[gyrolib::FlickMode]!=GL_FLICK_TOUCHPAD&&values[gyrolib::FlickMode]!=GL_FLICK_BOTH;
+    const bool observe=attached&&c->host.focused&&c->selected;
+    const bool steam_source=c->steam_input_available();
     double yaw=0,pitch=0;uint64_t detected=0;
     {std::lock_guard lock(o->mutex);const auto now=ticks()/1000000;
         o->mouse_route.consume(now,safe&&observe&&!c->panel&&!o->panel_open,view,c->selected,
-            (contacts&(GL_RIGHT|GL_SINGLE))!=0,static_cast<uint32_t>(values[gyrolib::SteamMouse]),observe,conversion,yaw,pitch);
+            (contacts&(GL_RIGHT|GL_SINGLE))!=0,static_cast<uint32_t>(values[gyrolib::SteamMouse]),observe,steam_source,yaw,pitch);
         detected=o->mouse_route.detected?c->selected:0;
-        o->mouse_clip_allowed=o->mouse_route.armed(now)&&!c->host.menu_open&&c->effective_output_target(view)!=GL_OUTPUT_CURSOR&&attached&&
+        o->mouse_clip_allowed=o->mouse_route.active(now)&&!c->host.menu_open&&c->effective_output_target(view)!=GL_OUTPUT_CURSOR&&attached&&
             foreground(static_cast<HWND>(o->window.load()));
         if(!o->mouse_clip_allowed)release_mouse_clip(o);
     }
@@ -85,7 +85,7 @@ bool route_mouse(MouseBridge* o,HWND window,uint32_t message,uint64_t wp,int64_t
         route.clear();o->mouse_clip_allowed=false;release_mouse_clip(o);return false;
     }
     const auto now=ticks()/1000000;
-    if(!route.armed(now))release_mouse_clip(o);
+    if(!route.active(now))release_mouse_clip(o);
     // Detect with the panel open too, but leave its normal UI input alone.
 
     const auto physical=[&]{o->physical_mouse_at=now;release_mouse_clip(o);};

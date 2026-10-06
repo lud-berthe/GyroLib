@@ -265,10 +265,7 @@ int32_t GL_CALL gl_setting_at(const gl_context* c,uint32_t index,gl_setting_info
     if(index==RecenterButton)out->visible=out->available=camera_view&&(c->recenter||c->recenter_step);
     if(index==RecenterMs)out->visible=out->available=camera_view&&c->recenter_step&&v[RecenterButton]!=0;
     if(index==SteamMouse){
-        const bool steam_pad=std::any_of(c->endpoints.begin(),c->endpoints.end(),[&](const auto& e){
-            return e.info.connected&&e.info.physical_id==c->selected&&(e.steam_input||e.info.source==GL_SOURCE_STEAM);
-        });
-        const bool ready=c->virtual_mouse&&(caps.touchpads&(GL_RIGHT|GL_SINGLE))&&steam_pad;
+        const bool ready=c->virtual_mouse&&c->steam_input_available();
         out->visible=out->available=connected&&c->selected&&(ready||c->steam_mouse_device==c->selected);
     }
     if(index==ZoomCompensation)out->visible=out->available=camera_view&&context&&context->zoom_available;

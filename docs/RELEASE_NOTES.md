@@ -2,6 +2,28 @@
 
 [Documentation](INDEX.md) / Maintenance
 
+## 1.2.1 — 6 October 2026
+
+Fixes Steam Input mouse routing being restricted to touchpad contact.
+
+- Steam-managed controllers no longer need touchpad hardware or contact to
+  expose the per-view mouse setting or confirm a relative mouse stream.
+- Pass through, Block and Convert movement apply to the shared Steam mouse
+  stream, including mappings from controls other than the touchpad.
+- Touchpad Flick Stick no longer disables mouse conversion globally. Avoid
+  assigning the same control to both GyroLib motion and Steam mouse conversion.
+- Cursor confinement ends after inactivity; ordinary physical HID mouse input
+  remains unaffected.
+
+Existing camera/cursor integrations, public APIs, ABI 1 and INI schema 0.2.0
+are unchanged. Close the host and replace `gyrolib.dll`; keep `gyrolib.ini`.
+Windows does not identify the originating Steam binding in mouse messages;
+see [routing and detection limits](OVERLAY.md#steam-input-mouse-movement).
+
+Downloads: [1.2.1 release](https://github.com/lud-berthe/GyroLib/releases/tag/v1.2.1)
+includes the DLL, SDK, demo and SHA-256 checksums. Windows x64; Linux and Proton
+remain unvalidated.
+
 ## 1.2.0 — 5 October 2026
 
 - **Steam touchpad mouse per view:** pass movement through, block it, or convert
