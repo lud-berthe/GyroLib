@@ -141,7 +141,7 @@ If another host reader later acquires a GyroLib-opened handle, coordinate owners
 
 ### Optional SDL window input
 
-Unreleased: attach the demo/host window once to enable the per-view
+Since 1.3.0, attach the demo/host window once to enable the per-view
 [Steam mouse setting](OVERLAY.md#steam-input-mouse-movement):
 
 ```cpp

@@ -2,7 +2,7 @@
 
 [Documentation](INDEX.md) / Maintenance
 
-## Unreleased
+## 1.3.0 — 8 October 2026
 
 - Recalibrate gyro now accepts fresh sensor data polled before the current core
   update. Previously the action compared it with the preceding frame's clock,
@@ -28,6 +28,18 @@ These fixes have synthetic coverage; affected controller hardware still needs
 validation. ABI 1 is retained. The additive
 `gl_set_endpoint_calibration_identity` API supports custom SDL-source producers;
 the built-in acquisition paths supply identity automatically.
+
+### Update
+
+Close the host and replace `gyrolib.dll`; keep `gyrolib.ini` and the license
+notices. Existing 1.x integrations remain compatible, and INI schema 0.2.0 is
+unchanged. Completed manual calibrations are saved automatically when the sensor
+has a unique hardware identity. Calibrate again to replace a saved reference.
+
+The release includes the standalone DLL, SDK, demo and SHA-256 checksums.
+Windows x64; Linux and Proton remain unvalidated. Mouse interception still
+requires a supported bridge and confirmation of the Steam movement stream;
+see [routing and detection limits](https://github.com/lud-berthe/GyroLib/blob/v1.3.0/docs/OVERLAY.md#steam-input-mouse-movement).
 
 ## 1.2.2 — 6 October 2026
 

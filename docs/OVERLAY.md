@@ -142,7 +142,7 @@ output. **Pass through** stays available. The host must keep reporting the menu
 view when its background camera is locked; camera permission is a separate flag.
 Loss of focus, stale host updates, no active view or the library panel suspend
 interception. Physical mouse motion and button/wheel packets remain untouched.
-Unreleased: the Windows bridge also intercepts confirmed injected movement
+Since 1.3.0, the Windows bridge also intercepts confirmed injected movement
 before it changes the system cursor or reaches legacy mouse input. Filtering
 only window messages left games polling the cursor position able to observe it.
 Raw movement still reaches the bridge for conversion, once per packet, including

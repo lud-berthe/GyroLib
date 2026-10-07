@@ -8,7 +8,15 @@ new game's hook correctness or input-to-photon latency.
 
 ## Latest SDK results
 
-Unreleased calibration-button fix, 8 October 2026: a regression first reproduced
+Release **1.3.0**, 8 October 2026: rebuilt Windows x64 Release binaries pass
+**56/56** bundled-DLL, **56/56** full-static and **23/23** core-static tests.
+Fresh installed SDKs were relocated before testing; their C/C++, DX12 and public
+API audit suites pass **28/28** checks across the three variants. The installed
+demo smoke test also passes. Consumers requesting the compatible 1.0 package
+baseline successfully use 1.3.0. These checks include the calibration-button fix
+below; affected physical controllers and live Steam menu routing remain pending.
+
+Release 1.3.0 calibration-button fix, 8 October 2026: a regression first reproduced
 the rejected action when acquisition supplied a newer sample before UI command
 processing. The core command and menu availability now use the same acquisition
 freshness check. Stale/missing acceleration and disconnected sensors remain
@@ -17,7 +25,7 @@ poll/process/update/render order and follows the countdown through completion,
 checking the measured bias. The click previously returned to idle after one
 optimistic UI frame. This test uses synthetic sensor data, not physical hardware.
 
-Unreleased cursor fix, 8 October 2026: **56/56** bundled DLL, **56/56** full-static
+Release 1.3.0 cursor fix, 8 October 2026: **56/56** bundled DLL, **56/56** full-static
 and **23/23** core-static tests pass. Regression tests cover suppression before
 legacy cursor updates, raw conversion exactly once, Block/Pass through, locked
 menu output, physical input exclusion, panel/focus release, update expiry and
@@ -26,7 +34,7 @@ implementation observed one raw movement count and zero system-cursor movement.
 This verifies the Windows input mechanism; the affected Steam layout and game
 still need a live check. Ordinary automated tests do not inject desktop input.
 
-Unreleased fixes, 7 October 2026: **55/55** bundled DLL, **55/55** full-static
+Pre-release checks, 7 October 2026: **55/55** bundled DLL, **55/55** full-static
 and **22/22** core-static
 tests pass on Windows x64/MSVC. Manual calibration regressions cover a stationary
 4.5 deg/s bias with +/-2 deg/s noise at 50, 100 and 250 Hz, randomized noise and
