@@ -117,7 +117,7 @@ int32_t GL_CALL gl_sdl_attach_window(gl_sdl* self,void* window) try {
     if(self->mouse_support){self->mouse_support->refresh();self->mouse_refresh_pending=false;self->mouse_support=nullptr;}
     if(!next)return GL_OK;
     self->mouse_bridge=gyrolib_detail::mouse_bridge_create(self->context);
-    if(!self->mouse_bridge){self->error="Context already has a mouse bridge or allocation failed";return GL_UNAVAILABLE;}
+    if(!self->mouse_bridge){self->error="Cannot create mouse bridge (already owned, allocation or Windows hook failed)";return GL_UNAVAILABLE;}
     self->mouse_filter.user=self;
     self->mouse_filter.raw=[](void* user,Uint64 device,bool absolute,Uint16 buttons,Sint32 x,Sint32 y){
         auto* reader=static_cast<gl_sdl*>(user);
@@ -192,6 +192,8 @@ int32_t GL_CALL gl_sdl_poll(gl_sdl* self,uint64_t now) try {
             if(const auto result=gl_register_endpoint(self->context,&p.info);result!=GL_OK){
                 self->devices_changed.store(true,std::memory_order_relaxed);return result;
             }
+            if(p.info.caps.gyro)gl_set_endpoint_calibration_identity(self->context,p.info.id,
+                gyrolib_sdl_detail::calibration_identity(SDL_GetGamepadVendor(handle),SDL_GetGamepadProduct(handle),serial));
             try{self->pads.push_back(std::move(p));}catch(...){gl_forget_endpoint(self->context,p.info.id);throw;}
             handle_guard.release();
         }

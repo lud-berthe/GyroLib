@@ -144,6 +144,7 @@ static bool receive(SensorProcess* p,const Record& r,uint64_t now){
         gl_endpoint e{};e.id=0x3000000000000000ull|p->next_id++;e.physical_id=r.identity;
         e.source=GL_SOURCE_SDL;e.connected=1;e.caps.gyro=1;e.caps.accelerometer=r.caps.accelerometer;std::memcpy(e.name,r.name,sizeof(e.name));
         if(gl_register_endpoint(p->context,&e)!=GL_OK)return false;
+        gl_set_endpoint_calibration_identity(p->context,e.id,r.calibration_identity);
         gl_set_endpoint_pairing_hint(p->context,e.id,r.hardware&65535,r.hardware>>16,0);
         gl_set_motion_companion(p->context,e.id);p->endpoints.emplace(r.endpoint,e.id);return true;
     }

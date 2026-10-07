@@ -176,7 +176,7 @@ gl_overlay* GL_CALL gl_overlay_create(gl_context* c,uint32_t abi)try{
     if(c->virtual_mouse){fail("Context already has a mouse input bridge");return nullptr;}
     o->open=c->panel;o->shortcut=c->menu_key;o->published=snapshot(*c);o->published_at=ticks();
     o->mouse_bridge=gyrolib_detail::mouse_bridge_create(c);
-    if(!o->mouse_bridge){fail("Cannot allocate mouse input bridge",GL_LIMIT);return nullptr;}
+    if(!o->mouse_bridge){fail("Cannot create mouse input bridge (allocation or Windows hook failed)",GL_UNAVAILABLE);return nullptr;}
     registered.insert(c);c->overlay_user=o.get();c->publish_overlay=publish_after_update;
     c->panel_changed=[](void* user,bool open){auto* overlay=static_cast<gl_overlay*>(user);overlay->open=open;
         gyrolib_detail::mouse_bridge_panel(overlay->mouse_bridge,open);

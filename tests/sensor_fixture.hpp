@@ -5,6 +5,7 @@
 static const char* sensor_fixture_case(){auto* v=SDL_getenv("GYROLIB_SENSOR_FIXTURE");return v?v:"";}
 static bool sensor_fixture_send(gyrolib_sensor::Record r){
     using namespace gyrolib_sensor;const char* mode=sensor_fixture_case();
+    if(std::strcmp(mode,"calibration")==0&&r.kind==Device)r.calibration_identity=0x1122334455667788ull;
     if(std::strcmp(mode,"bad")==0)r.revision=999;
     if(std::strcmp(mode,"bad-controls")==0&&r.kind==Controls)r.flick.stick_x=2.f;
     if(std::strcmp(mode,"stale")==0&&(r.kind==Motion||r.kind==Controls))r.observed_ns=1;

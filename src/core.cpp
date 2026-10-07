@@ -249,6 +249,7 @@ int32_t GL_CALL gl_register_endpoint(gl_context* c,const gl_endpoint* info) try 
         if(c->active==info->id) c->reset_temporal();
     }
     if(changed||metadata_changed)c->emit(GL_EVENT_DEVICE,info->connected,info->id);
+    if(changed&&info->connected&&e->calibration_identity)gl_set_endpoint_calibration_identity(c,info->id,e->calibration_identity);
     return GL_OK;
 } catch (...) { return GL_LIMIT; }
 int32_t GL_CALL gl_disconnect_endpoint(gl_context* c,uint64_t id) {
@@ -577,6 +578,7 @@ int32_t GL_CALL gl_update(gl_context* c,uint64_t now,const gl_host_state* host,g
             chosen->motion.process(sample,v,chosen->info.source==GL_SOURCE_STEAM,calibration_menu,sample_usable,c->allow_calibration,*output,track_axes);
         }
         auto& d=chosen->motion.diagnostics;
+        if(previous_cal!=GL_CAL_COMPLETE&&d.calibration_state==GL_CAL_COMPLETE)c->remember_calibration(*chosen);
         const bool calibrating=d.calibration_state==GL_CAL_COUNTDOWN||d.calibration_state==GL_CAL_COLLECTING||d.calibration_state==GL_CAL_MOVING;
         c->gyro_state={uint32_t(gate&&!calibrating),uint32_t(gravity_ok),uint32_t(d.accepted_samples-accepted),uint32_t(gate&&!calibrating&&track_axes!=0)};
         if(gate&&!calibrating)chosen->motion.trackball(dt,v[TrackballDecay],track_axes,*output);
@@ -696,7 +698,7 @@ int32_t GL_CALL gl_poll_event_ex(gl_context* c,gl_event_ex* e) {
 }
 int32_t GL_CALL gl_begin_calibration(gl_context* c) try {
     if(!c)return GL_INVALID;auto* e=c->endpoint(c->active);
-    if(!e||e->info.source==GL_SOURCE_STEAM||!fresh(e->last_accel,c->now))return GL_UNAVAILABLE;
+    if(!e||!e->can_calibrate(c->now))return GL_UNAVAILABLE;
     e->motion.begin();c->emit(GL_EVENT_CALIBRATION,GL_CAL_COUNTDOWN,c->active);return GL_OK;
 } catch (...) {return GL_LIMIT;}
 void GL_CALL gl_cancel_calibration(gl_context* c) {

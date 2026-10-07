@@ -1,6 +1,5 @@
 #include "../src/detail/internal.hpp"
 #include "../src/detail/mouse_route.hpp"
-#include "../src/detail/mouse_clip.hpp"
 #include <cmath>
 #include <iostream>
 #include <filesystem>
@@ -10,35 +9,6 @@
 #define CHECK(x) do{if(!(x))throw std::runtime_error(#x);}while(0)
 static void near(double x,double y){CHECK(std::abs(x-y)<1e-6);}
 int main()try{
-    // Simulated desktop: no test confines or moves the user's actual cursor.
-    using gyrolib_detail::ClipRect;using gyrolib_detail::MouseClip;
-    struct Desktop {
-        ClipRect screen{-1920,0,2560,1440},current=screen;
-        bool fail_get{},fail_set{},freed{};int writes{};
-        bool get(ClipRect& r){r=current;return !fail_get;}
-        bool set(const ClipRect* r){if(fail_set)return false;++writes;freed=!r;current=r?*r:screen;return true;}
-        ClipRect desktop(){return screen;}
-    } os;
-    const ClipRect window{100,100,1700,1000},small{300,300,700,700};MouseClip clip;
-    CHECK(clip.acquire(os,window));CHECK(os.current==window);CHECK(clip.owned);
-    CHECK(clip.acquire(os,window));CHECK(os.writes==1); // no repeated system writes
-    clip.release(os);CHECK(os.freed);CHECK(os.current==os.screen);CHECK(!clip.owned);
-    os.current=small;CHECK(clip.acquire(os,window));CHECK(!clip.owned); // respect tighter host clip
-    clip.release(os);CHECK(os.current==small);
-    os.current={0,0,800,800};const auto original=os.current;
-    CHECK(clip.acquire(os,window));CHECK((os.current==ClipRect{100,100,800,800}));
-    CHECK(clip.acquire(os,{200,200,900,900}));CHECK((os.current==ClipRect{200,200,800,800}));
-    clip.release(os);CHECK(os.current==original);CHECK(!os.freed);
-    os.current=os.screen;CHECK(clip.acquire(os,window));os.current=small;
-    clip.release(os);CHECK(os.current==small);CHECK(!clip.owned); // another owner changed it
-    os.current=os.screen;CHECK(clip.acquire(os,window));os.current=small;
-    CHECK(!clip.acquire(os,window));CHECK(os.current==small);CHECK(!clip.owned);
-    os.current=os.screen;os.fail_set=true;CHECK(!clip.acquire(os,window));CHECK(!clip.owned);
-    os.fail_set=false;CHECK(clip.acquire(os,window));os.fail_get=true;clip.release(os);CHECK(clip.owned);
-    os.fail_get=false;os.fail_set=true;clip.release(os);CHECK(clip.owned);
-    os.fail_set=false;clip.release(os);CHECK(!clip.owned);CHECK(os.freed);
-    os.current=small;CHECK(!clip.acquire(os,{-1900,10,-1000,1000}));CHECK(os.current==small);
-
     using gyrolib_detail::MouseRoute;
     MouseRoute route;double yaw=0,pitch=0;
     auto update=[&](uint64_t t,uint32_t mode=1,bool safe=true,uint32_t view=1,uint64_t device=1,bool touch=true,bool observe=true,bool steam_source=false){
@@ -57,7 +27,7 @@ int main()try{
     CHECK(route.raw(161,0,false,0,20,0));update(170,1);near(yaw,1); // drop pending conversion on Block
     update(180,2);CHECK(route.raw(181,0,false,0,20,0));update(190,0);near(yaw,1); // and Pass through
     update(200,2);CHECK(route.raw(201,0,false,0,20,0));update(210,2,true,2);near(yaw,1); // view transition
-    CHECK(route.raw(211,0,false,0,20,0));update(220,2,false,2);near(yaw,1);CHECK(!route.armed(221));
+    CHECK(route.raw(211,0,false,0,20,0));update(220,2,false,2);near(yaw,1);CHECK(route.armed(221));CHECK(route.raw(222,0,false,0,20,0));
     update(230,2,true,2);CHECK(route.raw(231,0,false,0,20,0));update(240,2,true,2,1,false);near(yaw,2);
     CHECK(route.raw(241,0,false,0,20,0));update(250,2,true,2,1,false);near(yaw,3); // inertia
     update(410,2,true,2,1,false);CHECK(!route.armed(411)); // inactivity
@@ -75,7 +45,7 @@ int main()try{
     for(int i=0;i<4;++i)CHECK(!uncorrelated.raw(301+i,0,false,0,1,1));CHECK(!uncorrelated.detected);
 
     // Steam joystick/gyro/button mouse mappings have no pad-contact signal.
-    // Corroborate their stream, release cursor confinement on inactivity, and
+    // Corroborate their stream, release active routing on inactivity, and
     // resume without ever touching a pad. All policies keep physical HID input.
     for(uint32_t mode:{0u,1u,2u}){
         MouseRoute generic;double y=0,p=0;
@@ -90,7 +60,7 @@ int main()try{
         generic.consume(110,true,1,7,false,mode,true,true,y,p);
         near(y,mode==2?1:0);near(p,mode==2?.5:0);
         generic.consume(300,true,1,7,false,mode,true,true,y,p);
-        CHECK(!generic.active(301)); // no desktop confinement while idle
+        CHECK(!generic.active(301)); // no recent active stream while idle
         CHECK(generic.raw(302,0,false,0,20,-10)==(mode!=0));
         CHECK(generic.active(303)==(mode!=0));
         generic.consume(310,true,1,7,false,mode,true,true,y,p);
@@ -99,13 +69,38 @@ int main()try{
         CHECK(!generic.detected);CHECK(!generic.raw(321,0,false,0,20,0));
     }
 
+    // Blocking applies in a known menu even with camera output disallowed.
+    MouseRoute menu;double menu_y=0,menu_p=0;
+    menu.consume(100,true,1,7,false,0,true,true,menu_y,menu_p);
+    menu.injected(101);for(int i=0;i<3;++i)menu.raw(102+i,0,false,0,20,0);
+    CHECK(menu.detected);
+    menu.consume(110,false,2,7,false,1,true,true,menu_y,menu_p);
+    CHECK(menu.raw(111,0,false,0,20,0));CHECK(menu.injected(112));
+    CHECK(!menu.raw(113,1234,false,0,20,0));
+    menu.consume(120,false,2,7,false,1,true,true,menu_y,menu_p);
+    near(menu_y,0);near(menu_p,0);
+    // Convert swallows motion while output is unavailable but queues nothing
+    // to replay later. Pass-through, focus loss and the library panel stay free.
+    menu.consume(130,false,2,7,false,2,true,true,menu_y,menu_p);
+    CHECK(menu.raw(131,0,false,0,20,10));
+    menu.consume(140,true,2,7,false,2,true,true,menu_y,menu_p);
+    near(menu_y,0);near(menu_p,0);
+    menu.consume(150,false,2,7,false,0,true,true,menu_y,menu_p);
+    CHECK(!menu.raw(151,0,false,0,20,10));
+    menu.consume(160,false,2,7,false,1,true,true,menu_y,menu_p,false);
+    CHECK(!menu.raw(161,0,false,0,20,10));
+    menu.consume(170,false,2,7,false,1,false,true,menu_y,menu_p);
+    CHECK(!menu.raw(171,0,false,0,20,10));
+    menu.consume(180,false,0,7,false,1,true,true,menu_y,menu_p);
+    CHECK(!menu.raw(181,0,false,0,20,10)); // no reported active view
+
     auto* c=gl_create(GL_ABI_VERSION);CHECK(c);
     struct State {MouseRoute route;gl_context* context{};uint64_t now=1000;double callback_yaw{},callback_pitch{};} state;
     state.context=c;c->virtual_mouse_user=&state;
     c->virtual_mouse=[](void* p,gl_output* output,bool safe,uint32_t view,uint32_t contacts){
         auto& s=*static_cast<State*>(p);auto* c=s.context;double mode=1;const auto key="context."+std::to_string(view)+".input.steam_mouse";gl_setting_get_effective(c,key.c_str(),&mode);
         s.route.consume(s.now,safe,view,c->selected,contacts&GL_RIGHT,static_cast<uint32_t>(mode),
-            c->host.focused,c->steam_input_available(),output->yaw_degrees,output->pitch_degrees);
+            c->host.focused,c->steam_input_available(),output->yaw_degrees,output->pitch_degrees,!c->panel);
         c->steam_mouse_device=s.route.detected?c->selected:0;
     };
     gl_set_camera_callback(c,[](void* p,double y,double x){auto& s=*static_cast<State*>(p);s.callback_yaw+=y;s.callback_pitch+=x;},&state);
@@ -168,10 +163,10 @@ int main()try{
     gl_reset_settings(restored);CHECK(gl_setting_get(restored,key,&value)==GL_OK);near(value,1);
     gl_destroy(restored);std::filesystem::remove(path);
     set("context.1.gyro.activation",GL_GYRO_OFF);tick();CHECK(metadata().visible);CHECK(state.route.raw(state.now+1,0,false,0,20,0));tick();near(output.yaw_degrees,1);
-    CHECK(state.route.raw(state.now+1,0,false,0,20,0));host.paused=1;tick();near(output.yaw_degrees,0);CHECK(!state.route.armed(state.now));
-    host.paused=0;tick();CHECK(state.route.raw(state.now+1,0,false,0,20,0));gl_set_panel_open(c,1);tick();near(output.yaw_degrees,0);
+    CHECK(state.route.raw(state.now+1,0,false,0,20,0));host.paused=1;tick();near(output.yaw_degrees,0);CHECK(state.route.armed(state.now));CHECK(state.route.raw(state.now+1,0,false,0,20,0));
+    host.paused=0;tick();CHECK(state.route.raw(state.now+1,0,false,0,20,0));gl_set_panel_open(c,1);tick();near(output.yaw_degrees,0);CHECK(!state.route.raw(state.now+1,0,false,0,20,0));
     gl_set_panel_open(c,0);tick();CHECK(state.route.raw(state.now+1,0,false,0,20,0));host.focused=0;tick();near(output.yaw_degrees,0);
-    host.focused=1;host.menu_open=1;tick();CHECK(!state.route.armed(state.now));
+    host.focused=1;host.menu_open=1;tick();CHECK(state.route.armed(state.now));CHECK(state.route.raw(state.now+1,0,false,0,20,0));
     host.menu_open=1;gl_set_host_capabilities(c,GL_HOST_MENU_STATE);gl_set_gameplay_context_output_target(c,1,GL_OUTPUT_CURSOR);tick();
     gl_choice converted{};CHECK(gl_choice_at(c,key,2,&converted)==GL_OK);
     const std::string cursor_label=converted.label,cursor_help=gl_choice_description(c,key,2);
@@ -181,5 +176,5 @@ int main()try{
     state.callback_yaw=0;CHECK(state.route.raw(state.now+1,0,false,0,20,0));tick();near(output.yaw_degrees,1);near(state.callback_yaw,0);
     CHECK(gl_forget_endpoint(c,1)==GL_OK);state.now+=10;gl_set_gameplay_context_state(c,1,1,1);CHECK(gl_update(c,state.now*1000000,&host,&output)==GL_OK);CHECK(!metadata().visible);CHECK(c->steam_mouse_device==0);
     c->virtual_mouse_user=nullptr;c->virtual_mouse=nullptr;gl_destroy(c);
-    std::cout<<"Steam mouse: detection, three modes, per-view settings, inheritance, persistence, camera/cursor output and clip ownership passed\n";return 0;
+    std::cout<<"Steam mouse: detection, three modes, per-view settings, inheritance, persistence, camera/cursor output passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

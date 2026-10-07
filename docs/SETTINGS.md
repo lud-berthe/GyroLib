@@ -83,11 +83,39 @@ See [menu availability](MENUS.md#controller-availability).
 Setters reject nonfinite or out-of-range values and round to the advertised step. Coupled settings, such as an acceleration preset and its curve, are updated
 together. Use stable setting IDs; labels and list positions may change.
 
+## Manual calibration memory
+
+A completed manual calibration saves the three-axis bias and measured noise in
+`gyrolib.ini`, independently of view presets. Recalibrating measures them again;
+only success replaces the saved result. Reset/recommended view settings preserve
+these sensor measurements. Automatic drift adjustments are not written back.
+
+The SDL reader and isolated reader identify individual sensors using a hash of
+VID, PID and the hardware serial. Names, model IDs alone, Steam pairing handles,
+temporary instance IDs and reusable port paths are never used as calibration
+keys. No raw serial is written to the INI. Without a serial, the bias remains
+session-only. If two connected endpoints claim the same calibration identity,
+its saved record is removed and reuse is disabled for that context's lifetime.
+
+Custom SDL-source producers can supply a stable individual-sensor identity with
+`gl_set_endpoint_calibration_identity` after endpoint registration; zero disables
+persistence. The built-in readers do this automatically. Steam-source endpoints
+reject this API because they must not receive an SDL calibration offset.
+Load-before-discovery and discovery-before-load are both supported.
+
+Records use `calibration.device.<16-digit hex identity>.manual=x,y,z,variance`.
+Bias is in degrees/second; variance is the summed gyro noise variance. Malformed
+or nonfinite records reject the load transaction. These entries are personal
+hardware data: do not include them in a recommended preset or mod release.
+
 ## Saving and errors
 
 After initialization, changed settings, language and reset/recommended actions
 save synchronously on the context owner thread. An unchanged value does not
-write. Input polling and controller fallback do not save settings. Slider edits
+write. Completion of a manual calibration saves its reference once. Detection
+of a duplicate calibration identity removes its ambiguous record. Ordinary
+input polling, automatic bias refinement and controller fallback do not write.
+Slider edits
 may save every changed tick; a host with slow storage can commit on edit completion.
 
 Check the setter/action result and `gl_get_settings_save_result`. If saving fails,

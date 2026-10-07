@@ -422,6 +422,14 @@ GL_API int32_t GL_CALL gl_poll_event(gl_context*,gl_event*); /* 1 event, 0 empty
    reports GL_EVENT_CONTEXT/detail=6 (refresh all settings) for IDs over 47 bytes. */
 GL_API int32_t GL_CALL gl_poll_event_ex(gl_context*,gl_event_ex*);
 GL_API int32_t GL_CALL gl_begin_calibration(gl_context*);
+/* Optional stable identity of an individual SDL motion sensor (0 = session only).
+ * Must not be a model/name, instance index, Steam handle or pairing group.
+ * The SDL readers supply a VID/PID/serial-derived identity automatically.
+ * A successful manual bias/noise measurement is saved in the normal INI and
+ * restored for that sensor. Steam samples never receive this correction.
+ * Duplicate connected identities disable restoration/persistence for the key.
+ * Additive ABI 1 API; call on the context owner thread after registration. */
+GL_API int32_t GL_CALL gl_set_endpoint_calibration_identity(gl_context*,uint64_t endpoint,uint64_t identity);
 GL_API void GL_CALL gl_cancel_calibration(gl_context*);
 /* Filter only explicitly connected NON-AIM actions. EMIT_TAP means synthesize a
  * press+release of that game action, locally; never inject OS events. key 0..63.

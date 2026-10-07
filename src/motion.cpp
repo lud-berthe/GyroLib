@@ -10,20 +10,28 @@ Motion::Motion() {
     fusion_.PauseContinuousCalibration();
 }
 void Motion::clear_smoothing() { filter_.reset(); }
+void Motion::restore_calibration(const std::optional<ManualCalibration>& value) {
+    manual_reference_=value;
+    diagnostics.bias=value?value->bias:gl_vec3{};
+    const auto b=diagnostics.bias;
+    fusion_.SetCalibrationOffset(b.x,b.y,b.z,1);
+    resume();cancel();
+}
 void Motion::resume() {
     previous_ns_=0; gravity_ready_=false; clear_smoothing(); stillness_.reset();
     clock_.resume();
-    still_time_=collect_time_=0; count_=0; mean_=auto_mean_={}; diagnostics.stationary=0;
+    still_time_=collect_time_=mean_error_=noise_sum_=auto_error_=0; count_=0; mean_=auto_mean_={}; diagnostics.stationary=0;
     clear_trackball();
 }
 void Motion::begin() {
     diagnostics.calibration_state=GL_CAL_COUNTDOWN;
     diagnostics.calibration_seconds_remaining=5;
-    countdown_=5; collect_time_=still_time_=0; count_=0; mean_={}; clear_smoothing();
+    countdown_=5; collect_time_=still_time_=mean_error_=noise_sum_=auto_error_=0; count_=0; mean_={}; clear_smoothing();
 }
 void Motion::cancel() {
     diagnostics.calibration_state=GL_CAL_IDLE;
     diagnostics.calibration_seconds_remaining=0; countdown_=collect_time_=0;
+    stillness_.reset();still_time_=auto_error_=0;
 }
 void Motion::process(const gl_sample& s,const Settings& v,bool steam,bool menu,bool active,bool allow_calibration,
                      gl_output& out,uint32_t track_axes) {
@@ -40,26 +48,34 @@ void Motion::process(const gl_sample& s,const Settings& v,bool steam,bool menu,b
     if (dt>0.1) { resume(); ++diagnostics.rejected_samples; return; }
     ++diagnostics.accepted_samples;
     const auto g=s.gyro_dps,a=s.accel_g;
-    const auto window=stillness_.update(g,a,dt);
-    diagnostics.stationary=stillness_.stationary();
     // Only our SDL stream owns a bias. Steam data is fused with zero local bias.
     bool manual=!steam && (diagnostics.calibration_state==GL_CAL_COUNTDOWN ||
         diagnostics.calibration_state==GL_CAL_COLLECTING || diagnostics.calibration_state==GL_CAL_MOVING);
+    const bool referenced=!steam&&!manual&&manual_reference_.has_value();
+    const auto window=stillness_.update(g,a,dt,manual,
+        referenced?manual_reference_->bias:gl_vec3{},referenced?manual_reference_->noise_variance:0);
+    diagnostics.stationary=stillness_.stationary();
     if (manual && countdown_>0) {
         countdown_=std::max(0.0,countdown_-dt);
         diagnostics.calibration_seconds_remaining=static_cast<float>(countdown_);
         if (countdown_==0) { diagnostics.calibration_state=GL_CAL_COLLECTING; stillness_.reset(); }
     } else if (manual) {
         if (stillness_.moving()) {
-            diagnostics.calibration_state=GL_CAL_MOVING; collect_time_=0; count_=0; mean_={};
+            diagnostics.calibration_state=GL_CAL_MOVING; collect_time_=mean_error_=noise_sum_=0; count_=0; mean_={};
         } else if (window.complete && window.stable) {
             diagnostics.calibration_state=GL_CAL_COLLECTING;
             count_+=window.samples; collect_time_+=window.seconds;
             const auto add=[&](float& mean,float value){mean+=float(window.seconds/collect_time_)*(value-mean);};
             add(mean_.x,window.gyro.x);add(mean_.y,window.gyro.y);add(mean_.z,window.gyro.z);
-            if (collect_time_>=1-1e-9 && count_>=20) {
+            // A noisy window needs more samples, not a larger permitted drift
+            // after calibration. Estimate the time-weighted mean uncertainty.
+            mean_error_+=window.seconds*window.seconds*window.gyro_variance/window.samples;
+            noise_sum_+=window.seconds*window.gyro_variance;
+            if (collect_time_>=1-1e-9 && count_>=20 && mean_error_<=.05*.05*collect_time_*collect_time_) {
                 fusion_.SetCalibrationOffset(mean_.x,mean_.y,mean_.z,1);
                 diagnostics.bias=mean_; diagnostics.calibration_state=GL_CAL_COMPLETE;
+                manual_reference_=ManualCalibration{mean_,noise_sum_/collect_time_};
+                stillness_.reset();
             }
         }
     }
@@ -69,18 +85,25 @@ void Motion::process(const gl_sample& s,const Settings& v,bool steam,bool menu,b
     // only accept tiny residual corrections relative to the last trusted bias.
     // Larger errors remain correctable in menus, while disabled, or manually.
     const bool guarded=active&&!menu;
-    if(guarded&&window.complete&&std::hypot(window.gyro.x-diagnostics.bias.x,
+    if(!referenced&&guarded&&window.complete&&std::hypot(window.gyro.x-diagnostics.bias.x,
         window.gyro.y-diagnostics.bias.y,window.gyro.z-diagnostics.bias.z)>.15)auto_allowed=false;
-    if (!auto_allowed || stillness_.moving()) still_time_=0;
+    if (!auto_allowed || stillness_.moving()) still_time_=auto_error_=0;
     else if (window.complete && window.stable) {
         still_time_+=window.seconds;
         auto blend=[&](float& x,float y) { x+=static_cast<float>(window.seconds/still_time_)*(y-x); };
         blend(auto_mean_.x,window.gyro.x); blend(auto_mean_.y,window.gyro.y); blend(auto_mean_.z,window.gyro.z);
-        if (still_time_>=1-1e-9) {
+        auto_error_+=window.seconds*window.seconds*window.gyro_variance/window.samples;
+        if (still_time_>=1-1e-9 && (!referenced||auto_error_<=.05*.05*still_time_*still_time_)) {
             auto bias=diagnostics.bias;
-            float alpha=static_cast<float>(-std::expm1(-window.seconds/(guarded?8:2)));
-            bias.x+=alpha*(auto_mean_.x-bias.x); bias.y+=alpha*(auto_mean_.y-bias.y); bias.z+=alpha*(auto_mean_.z-bias.z);
-            fusion_.SetCalibrationOffset(bias.x,bias.y,bias.z,1); diagnostics.bias=bias;
+            const auto distance=[&](gl_vec3 b){return std::hypot(auto_mean_.x-b.x,auto_mean_.y-b.y,auto_mean_.z-b.z);};
+            // A manual reference permits only bounded residual learning. Noise
+            // is averaged before this check; it must not widen the motion gate.
+            if(!referenced||(distance(manual_reference_->bias)<=.5&&(!guarded||distance(bias)<=.15))){
+                float alpha=static_cast<float>(-std::expm1(-(referenced?still_time_:window.seconds)/(guarded?8:2)));
+                bias.x+=alpha*(auto_mean_.x-bias.x); bias.y+=alpha*(auto_mean_.y-bias.y); bias.z+=alpha*(auto_mean_.z-bias.z);
+                fusion_.SetCalibrationOffset(bias.x,bias.y,bias.z,1); diagnostics.bias=bias;
+            }
+            if(referenced)still_time_=auto_error_=0;
         }
     }
     fusion_.ProcessMotion(g.x,g.y,g.z,a.x,a.y,a.z,static_cast<float>(dt));

@@ -8,6 +8,49 @@ new game's hook correctness or input-to-photon latency.
 
 ## Latest SDK results
 
+Unreleased calibration-button fix, 8 October 2026: a regression first reproduced
+the rejected action when acquisition supplied a newer sample before UI command
+processing. The core command and menu availability now use the same acquisition
+freshness check. Stale/missing acceleration and disconnected sensors remain
+unavailable. The real DX12 panel test clicks Recalibrate gyro in the documented
+poll/process/update/render order and follows the countdown through completion,
+checking the measured bias. The click previously returned to idle after one
+optimistic UI frame. This test uses synthetic sensor data, not physical hardware.
+
+Unreleased cursor fix, 8 October 2026: **56/56** bundled DLL, **56/56** full-static
+and **23/23** core-static tests pass. Regression tests cover suppression before
+legacy cursor updates, raw conversion exactly once, Block/Pass through, locked
+menu output, physical input exclusion, panel/focus release, update expiry and
+hook ownership/restart. A bounded Windows SendInput probe using the actual hook
+implementation observed one raw movement count and zero system-cursor movement.
+This verifies the Windows input mechanism; the affected Steam layout and game
+still need a live check. Ordinary automated tests do not inject desktop input.
+
+Unreleased fixes, 7 October 2026: **55/55** bundled DLL, **55/55** full-static
+and **22/22** core-static
+tests pass on Windows x64/MSVC. Manual calibration regressions cover a stationary
+4.5 deg/s bias with +/-2 deg/s noise at 50, 100 and 250 Hz, randomized noise and
+accelerometer jitter, and rejection of sustained tilt and large impulses.
+The noisy cases failed with the previous manual thresholds. Unreferenced
+automatic calibration retains its old limits and existing regressions.
+
+The manual-reference suite validates automatic save, restore before/after device
+discovery, new endpoint IDs, same-name controllers with separate serials, duplicate
+identity rejection, missing serials, Steam isolation, malformed-file transactions,
+failed-save recovery, unknown metadata preservation, and preservation across
+cancellation and preference/preset resets. A second
+manual calibration replaces both the raw bias and measured noise only on success.
+Noisy residual learning, active-aim limits and the host veto are covered; learned
+session refinements do not overwrite the manual reference. An isolated-reader
+fixture also verifies calibration identity propagation through the IPC protocol.
+
+Mouse-routing regressions reproduce and correct interception being released
+in a known view while camera output is denied or paused. They cover Block,
+Convert without delayed replay, Pass through, physical mouse exclusion, unknown
+views, focus loss and the library panel. These are synthetic tests; calibration
+on affected original Switch Pro hardware and live paused-menu routing remain
+to be verified. There is no claim that arbitrary sensor noise is corrected.
+
 Release **1.2.2**, 6 October 2026: **53/53** bundled DLL, **53/53** full-static
 and **21/21** core-static tests pass. Installed consumers and SDK regressions
 pass **23/23** checks, plus the demo smoke test and quickstart build.

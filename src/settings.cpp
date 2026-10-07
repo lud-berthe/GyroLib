@@ -198,7 +198,7 @@ int32_t GL_CALL gl_setting_at(const gl_context* c,uint32_t index,gl_setting_info
         if(i==4)out->visible=out->available=gl_has_recommended_settings(c);
         if(i<2){
             auto* e=c->endpoint(c->active);out->available=e&&e->info.source==GL_SOURCE_SDL&&
-                (i==1||(e->last_accel&&c->now>=e->last_accel&&c->now-e->last_accel<150000000));
+                (i==1||e->can_calibrate(c->now));
             const auto state=e?e->motion.diagnostics.calibration_state:GL_CAL_IDLE;
             const bool pending=state==GL_CAL_COUNTDOWN||state==GL_CAL_COLLECTING||state==GL_CAL_MOVING;
             out->visible=(!e||e->info.source!=GL_SOURCE_STEAM)&&(i==0?!pending:pending);
@@ -578,11 +578,30 @@ int32_t GL_CALL gl_load_settings(gl_context* c,const char* path) try {
         gamepad_menu_shortcut=it->second=="1";values.erase(it);
     }
     double automatic_calibration=c->settings[AutoCal];
+    std::map<uint64_t,ManualCalibration> calibrations;
     auto profiles=c->context_settings;std::map<std::string,std::string> unknown;
     auto links=c->profile_links;std::map<uint32_t,uint32_t> parents;
     std::map<uint32_t,std::map<int,double>> edits;
     std::map<uint32_t,std::bitset<SettingCount>> explicitly_inherited;
     for(const auto& [key,text]:values) {
+        if(key.starts_with("calibration.device.")&&key.ends_with(".manual")){
+            constexpr std::string_view prefix="calibration.device.",suffix=".manual";
+            if(key.size()!=prefix.size()+16+suffix.size()||!key.ends_with(suffix))return GL_INVALID;
+            const auto token=std::string_view(key).substr(prefix.size(),16);
+            if(token.find_first_not_of("0123456789abcdef")!=std::string_view::npos)return GL_INVALID;
+            uint64_t identity{};const auto parsed=std::from_chars(token.data(),token.data()+token.size(),identity,16);
+            if(parsed.ec!=std::errc{}||!identity)return GL_INVALID;
+            std::array<double,4> components{};size_t start=0;
+            for(size_t n=0;n<components.size();++n){
+                const auto comma=text.find(',',start);
+                if((n<3)==(comma==std::string::npos)||!parse_number(text.substr(start,comma-start),components[n]))return GL_INVALID;
+                start=comma+1;
+            }
+            if(std::hypot(components[0],components[1],components[2])>=10||components[3]<0||components[3]>=9)return GL_INVALID;
+            if(calibrations.size()>=128)return GL_LIMIT;
+            calibrations[identity]={{float(components[0]),float(components[1]),float(components[2])},components[3]};
+            continue;
+        }
         uint32_t context_id;int field;
         if(key.starts_with("context.")&&key.ends_with(".inherit")){
             const auto probe=key.substr(0,key.size()-8)+".sensitivity_x";double parent;
@@ -653,6 +672,8 @@ int32_t GL_CALL gl_load_settings(gl_context* c,const char* path) try {
     gl_set_language(c,language.c_str());
     gl_set_menu_key(c,menu_key);
     gl_set_gamepad_menu_shortcut(c,gamepad_menu_shortcut);
+    for(auto key:c->ambiguous_calibrations)calibrations.erase(key);
+    c->manual_calibrations=std::move(calibrations);c->restore_calibrations();
     c->unknown_settings=std::move(unknown);c->settings_path=std::move(remembered_path);c->settings_save_result=GL_OK;return GL_OK;
 } catch (...) {return GL_IO_ERROR;}
 static int32_t write_settings(gl_context* c,const char* path) try {
@@ -680,6 +701,12 @@ static int32_t write_settings(gl_context* c,const char* path) try {
     file<<"\n# Back + Start opens the panel. Set 0 to disable.\nui.gamepad_menu_shortcut="<<int(c->gamepad_menu_shortcut);
     file<<"\nui.language="<<c->language<<'\n'<<std::setprecision(12);
     file<<"calibration.automatic="<<c->settings[AutoCal]<<'\n';
+    if(!c->manual_calibrations.empty())file<<"\n# Per-sensor manual calibration: bias x,y,z (deg/s), noise variance.\n";
+    for(const auto& [identity,measurement]:c->manual_calibrations){
+        const auto b=measurement.bias;
+        file<<"calibration.device."<<std::hex<<std::setw(16)<<std::setfill('0')<<identity<<std::dec<<std::setfill(' ')
+            <<".manual="<<b.x<<','<<b.y<<','<<b.z<<','<<measurement.noise_variance<<'\n';
+    }
     for(const auto& [id,profile]:c->context_settings){
         file<<"\n# View "<<id<<'\n';
         auto link=c->profile_links.find(id);

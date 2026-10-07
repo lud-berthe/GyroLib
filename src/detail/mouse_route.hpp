@@ -7,17 +7,19 @@ namespace gyrolib_detail {
 // correlate them with injected window motion and Steam Input availability.
 // Contact remains a bootstrap fallback when Steam metadata is unavailable.
 struct MouseRoute {
-    bool enabled=true,safe{},touching{},observing{},detected{},steam_input{};
+    bool enabled=true,safe{},intercepting{},touching{},observing{},detected{},steam_input{};
     uint32_t mode=1,view{},raw_count{};
     uint64_t device{},updated{},last_packet{},first_queued{},raw_at{},injected_at{};
     double gain=.05,x{},y{}; // degrees/count; not gyro sensor samples
     static bool fresh(uint64_t now,uint64_t stamp,uint64_t limit){return stamp&&now>=stamp&&now-stamp<=limit;}
-    void clear(){safe=touching=observing=steam_input=false;x=y=0;last_packet=first_queued=raw_at=injected_at=0;raw_count=0;}
+    void clear(){safe=intercepting=touching=observing=steam_input=false;x=y=0;last_packet=first_queued=raw_at=injected_at=0;raw_count=0;}
     bool candidate(uint64_t now)const{
         return enabled&&observing&&device&&fresh(now,updated,100)&&
             (steam_input||touching||fresh(now,last_packet,150));
     }
-    bool armed(uint64_t now)const{return safe&&mode!=0&&detected&&candidate(now);}
+    // Input interception survives a camera pause. Conversion still requires
+    // output permission; the library panel and unknown views never intercept.
+    bool armed(uint64_t now)const{return intercepting&&mode!=0&&detected&&candidate(now);}
     bool active(uint64_t now)const{return armed(now)&&fresh(now,last_packet,150);}
     void detect(uint64_t now){if(raw_count>=3&&fresh(now,raw_at,100)&&fresh(now,injected_at,100))detected=true;}
     bool injected(uint64_t now){
@@ -30,21 +32,21 @@ struct MouseRoute {
         raw_count=fresh(now,raw_at,100)?(raw_count<3?raw_count+1:3):1;
         raw_at=last_packet=now;detect(now);
         if(!armed(now))return false;
-        if(mode==2){
+        if(mode==2&&safe){
             if(std::abs(x+dx)>1000000||std::abs(y+dy)>1000000){clear();return false;}
             if(!first_queued)first_queued=now;x+=dx;y+=dy;
         }
         return true;
     }
     void consume(uint64_t now,bool allowed,uint32_t next_view,uint64_t next_device,bool contact,
-                 uint32_t next_mode,bool observe,bool steam_source,double& yaw,double& pitch){
-        if(allowed&&safe&&observe&&mode==2&&next_mode==mode&&view==next_view&&device==next_device&&fresh(now,first_queued,100)){
+                 uint32_t next_mode,bool observe,bool steam_source,double& yaw,double& pitch,bool intercept=true){
+        if(intercept&&intercepting&&allowed&&safe&&observe&&mode==2&&next_mode==mode&&view==next_view&&device==next_device&&fresh(now,first_queued,100)){
             yaw+=x*gain;pitch-=y*gain;
         }
         x=y=0;first_queued=0;
         if(device!=next_device){clear();detected=false;}
         if(!observe)clear();
-        safe=allowed;view=next_view;device=next_device;touching=contact;updated=now;
+        safe=allowed;intercepting=intercept&&next_view!=0;view=next_view;device=next_device;touching=contact;updated=now;
         mode=next_mode;observing=observe;steam_input=steam_source;
     }
 };

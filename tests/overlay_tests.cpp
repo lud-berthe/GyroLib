@@ -93,7 +93,7 @@ static void fresh_input_options(){
     const gl_overlay_dx12_desc desc{sizeof(desc),GL_OVERLAY_ABI_VERSION,0,0,g.window,g.swap.Get(),g.queue.Get()};
     render.run([&]{CHECK(gl_overlay_dx12_init(overlay,&desc)==GL_OK);});
     CHECK(gl_overlay_set_open(overlay,1)==GL_OK);
-    uint64_t now=1000000000;bool streaming=false;
+    uint64_t now=1000000000;bool streaming=false,calibration_samples=false;
     auto frame=[&]{
         now+=16000000;
         if(streaming){
@@ -101,7 +101,7 @@ static void fresh_input_options(){
             CHECK(gl_submit_controls(c,42,&controls)==GL_OK);
             const gl_trigger_input triggers{now,GL_LEFT|GL_RIGHT,0,0};
             CHECK(gl_submit_trigger_input(c,42,&triggers)==GL_OK);
-            const gl_sample sample{now,now,{0,10,0},{0,-1,0}};
+            const gl_sample sample{now,now,calibration_samples?gl_vec3{1.5f,0,0}:gl_vec3{0,10,0},{0,-1,0}};
             CHECK(gl_submit_sample(c,42,&sample)==GL_OK);
         }
         CHECK(gl_overlay_process(overlay)==GL_OK); // Exactly one call per update.
@@ -138,6 +138,21 @@ static void fresh_input_options(){
     streaming=false;for(unsigned n=0;n<12;++n)frame();
     CHECK(choose_space(0)==GL_SPACE_LOCAL_YAW);
     streaming=true;frame();frame();frame();CHECK(choose_space(0)==GL_SPACE_PLAYER);
+    // Click the actual footer action. Each frame polls a newer sensor sample
+    // before processing the queued click, as an ordinary host does.
+    calibration_samples=true;frame();frame();
+    const auto calibrate_position=MAKELPARAM(850,640);
+    gl_overlay_win32_message(overlay,g.window,WM_MOUSEMOVE,0,calibrate_position);
+    gl_overlay_win32_message(overlay,g.window,WM_LBUTTONDOWN,0,calibrate_position);frame();
+    gl_overlay_win32_message(overlay,g.window,WM_LBUTTONUP,0,calibrate_position);frame();frame();
+    gl_diagnostics calibration{};CHECK(gl_get_diagnostics(c,&calibration)==GL_OK);
+    CHECK(calibration.calibration_state==GL_CAL_COUNTDOWN);
+    for(int n=0;n<420&&calibration.calibration_state!=GL_CAL_COMPLETE;++n){
+        frame();CHECK(gl_get_diagnostics(c,&calibration)==GL_OK);
+        CHECK(calibration.calibration_state!=GL_CAL_IDLE);
+    }
+    CHECK(calibration.calibration_state==GL_CAL_COMPLETE);
+    CHECK(calibration.bias.x>1.49f&&calibration.bias.x<1.51f);
     device.caps.accelerometer=0;CHECK(gl_register_endpoint(c,&device)==GL_OK);
     frame();frame();CHECK(choose_space(0)==GL_SPACE_LOCAL_YAW);
     CHECK(gl_overlay_detach(overlay)==GL_OK);

@@ -6,6 +6,8 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <filesystem>
+#include <fstream>
 
 int main(int argc,char** argv){
     if(argc!=3)return 1;const bool live=std::strcmp(argv[2],"live")==0||std::strcmp(argv[2],"shell-live")==0;
@@ -15,6 +17,7 @@ int main(int argc,char** argv){
     const bool contacts=std::strncmp(argv[2],"contacts",8)==0;
     const bool flick_stream=std::strcmp(argv[2],"flick-stream")==0;
     const bool delayed_poll=std::strcmp(argv[2],"delayed-poll")==0;
+    const bool calibration=std::strcmp(argv[2],"calibration")==0;
     const bool bad_controls=std::strcmp(argv[2],"bad-controls")==0;
     bool delayed=false;
     // Reproduce environment inherited at process launch, not just SDL's cached
@@ -28,6 +31,12 @@ int main(int argc,char** argv){
     SDL_SetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES,"0x054c/0x0ce6");
     if(!SDL_Init(0))return 2;
     auto* c=gl_create(GL_ABI_VERSION);if(!declare_test_view(c))return 5;auto* process=sensor_process_create(c);
+    if(calibration){
+        const auto path=std::filesystem::current_path()/("sensor-calibration-"+std::to_string(SDL_GetTicksNS())+".ini");
+        {std::ofstream file(path);file<<"schema=" GL_SETTINGS_SCHEMA "\ncalibration.device.1122334455667788.manual=1.25,0,0,0\n";}
+        const auto result=gl_load_settings(c,path.string().c_str());std::filesystem::remove(path);
+        gl_set_settings_path(c,"");if(result!=GL_OK)return 6;
+    }
     gl_endpoint pad{};pad.id=pad.physical_id=77;pad.connected=1;pad.source=GL_SOURCE_SDL;gl_register_endpoint(c,&pad);
     if(automatic)gl_set_endpoint_pairing_hint(c,77,0xffff,0xfffe,1);
     gl_select_device(c,77);gl_host_state host{};host.focused=host.camera_allowed=1;
@@ -42,6 +51,7 @@ int main(int argc,char** argv){
     bool pad_position=false,pad_released=false;
     unsigned flick_changes=0;float previous_axis=0;uint64_t last_flick_change=0,max_flick_gap=0;
     bool feedback_sent=false,feedback_delivered=false;
+    bool restored_calibration=false;
     // Measure stream behavior after the fixture appears, separately from OS
     // startup. A slow process launch must not consume the entire data window.
     const auto begin=SDL_GetTicks();Uint64 ready=0;double resumed=0;
@@ -72,6 +82,7 @@ int main(int argc,char** argv){
         }
         if(ready&&SDL_GetTicks()-ready>1200)resumed+=std::abs(output.yaw_degrees);
         gl_diagnostics d{};gl_get_diagnostics(c,&d);accepted+=d.accepted_samples?1:0;
+        if(calibration&&d.accepted_samples&&std::abs(d.bias.x-1.25)<.001)restored_calibration=true;
         for(uint32_t i=0;i<gl_endpoint_count(c);++i){gl_endpoint e{};gl_get_endpoint(c,i,&e);
             if(gl_is_motion_companion(c,e.id)&&e.caps.touchpads==3&&e.caps.stick_touch==3&&e.caps.grip_touch==3&&e.caps.sticks==3)contact_caps=true;
             if(gl_is_motion_companion(c,e.id)&&e.id!=last_id){
@@ -93,6 +104,7 @@ int main(int argc,char** argv){
     if(std::strcmp(argv[2],"reconnect")==0)ok&=binds>=2;
     if(stall)ok&=binds==1&&resumed>10; // same endpoint/binding, fresh rotation after re-arm
     if(delayed_poll)ok&=delayed&&binds==1&&error.empty()&&rotation>30;
+    if(calibration)ok&=restored_calibration;
     if(contacts)ok&=contact_caps&&labels&&duplicates_hidden&&pad_position&&pad_released&&active_frames>30&&inactive_frames>30&&transitions>=4;
     if(flick_stream){std::printf("flick changes=%u max_gap_ms=%.2f feedback=%d\n",flick_changes,max_flick_gap*1e-6,feedback_delivered);ok&=flick_changes>80&&max_flick_gap<100000000&&feedback_delivered;}
     ok&=stopped&&std::strcmp(SDL_GetEnvironmentVariable(SDL_GetEnvironment(),"SteamAppId"),"Fixture host untouched")==0;

@@ -1,5 +1,6 @@
 // Isolated SDL acquisition: all controller protocols stay in SDL, not GyroLib.
 #include "detail/sensor_wire.hpp"
+#include "sdl_identity.hpp"
 #include "detail/sdl_controls.hpp"
 #include "detail/sensor_watchdog.hpp"
 #include "detail/touchpad_haptic.hpp"
@@ -149,6 +150,7 @@ int main(int argc,char** argv){
                 key+=serial&&*serial?std::string("serial:")+serial:(path&&*path?std::string("path:")+path:std::to_string(ids[n]));
                 Pad p{g,next++,identity(key.c_str())};p.motion.opened(now);
                 Record r{.kind=Device,.hardware=uint32_t(SDL_GetGamepadVendor(g))|(uint32_t(SDL_GetGamepadProduct(g))<<16),.endpoint=p.id,.identity=p.identity};
+                r.calibration_identity=gyrolib_sdl_detail::calibration_identity(SDL_GetGamepadVendor(g),SDL_GetGamepadProduct(g),serial);
                 r.caps.gyro=1;r.caps.accelerometer=SDL_GamepadHasSensor(g,SDL_SENSOR_ACCEL);
                 std::snprintf(r.name,sizeof(r.name),"%s",SDL_GetGamepadName(g));running&=send(r);
                 pads.emplace(ids[n],std::move(p));

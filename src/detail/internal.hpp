@@ -50,6 +50,7 @@ bool button_matches(uint32_t state,int choice);
 inline bool gravity_space(int space){return space==GL_SPACE_PLAYER||space==GL_SPACE_WORLD||
     space==GL_SPACE_PLAYER_LEAN||space==GL_SPACE_WORLD_LEAN||space==GL_SPACE_LASER_POINTER;}
 
+struct ManualCalibration {gl_vec3 bias{};double noise_variance{};};
 class Motion {
     GamepadMotion fusion_;
     Stillness stillness_;
@@ -57,7 +58,8 @@ class Motion {
     uint64_t previous_ns_{};
     TieredFilter filter_;
     SensorClock clock_;
-    double countdown_{},collect_time_{},still_time_{};
+    double countdown_{},collect_time_{},still_time_{},mean_error_{},noise_sum_{},auto_error_{};
+    std::optional<ManualCalibration> manual_reference_;
     gl_vec3 mean_{},auto_mean_{};
     unsigned count_{};
     int previous_space_{-1};
@@ -68,6 +70,8 @@ public:
     void resume();
     void begin();
     void cancel();
+    const std::optional<ManualCalibration>& manual_reference()const{return manual_reference_;}
+    void restore_calibration(const std::optional<ManualCalibration>&);
     void clear_smoothing();
     void clear_trackball(){track_x_=track_y_=0;}
     void trackball(double dt,double decay,uint32_t axes,gl_output&);
@@ -90,6 +94,7 @@ struct GameplayContext {
 struct ButtonContact {uint32_t family{},side{};};
 struct EndpointState {
     gl_endpoint info{};
+    uint64_t calibration_identity{}; // individual sensor, independent of session pairing
     bool motion_companion{};
     uint64_t companion_identity{};
     uint32_t pairing_vendor{};
@@ -111,6 +116,13 @@ struct EndpointState {
     std::array<double,64> intervals{};
     unsigned interval_count{},interval_next{};
     Motion motion;
+    bool can_calibrate(uint64_t now) const {
+        // A freshly polled sample can precede the next gl_update. Judge its
+        // acceleration against that acquisition time without advancing c->now.
+        const auto current=now>last_arrival?now:last_arrival;
+        return info.connected&&info.source==GL_SOURCE_SDL&&info.caps.gyro&&info.caps.accelerometer&&
+            last_accel&&current>=last_accel&&current-last_accel<150000000;
+    }
 };
 }
 struct gl_context {
@@ -121,6 +133,10 @@ struct gl_context {
     std::array<gl_event_ex,128> events{};
     size_t event_begin{},event_count{};
     std::map<std::string,std::string> unknown_settings;
+    std::map<uint64_t,gyrolib::ManualCalibration> manual_calibrations;
+    std::set<uint64_t> ambiguous_calibrations;
+    void restore_calibrations();
+    void remember_calibration(gyrolib::EndpointState&);
     std::map<uint32_t,gyrolib::GameplayContext> gameplay_contexts;
     // Saved independently of registration; temporarily unavailable mods keep values.
     std::map<uint32_t,gyrolib::Settings> context_settings;

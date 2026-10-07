@@ -255,15 +255,56 @@ static void noisy_calibration(){
         tilt.report();CHECK(gl_update(tilt.c,tilt.now,&tilt.host,&tilt.out)==GL_OK);
     }
     gl_diagnostics d{};gl_get_diagnostics(tilt.c,&d);near(d.bias.x,0);
-    // Manual placement uses the same noise-tolerant detector after its countdown.
+    // Manual placement uses windowed stillness after its countdown.
     Fixture manual;manual.device();manual.prime();CHECK(gl_begin_calibration(manual.c)==GL_OK);
-    for(int i=0;i<660;++i){const float n=i%2?1.f:-1.f;manual.tick({.4f+.55f*n,.2f-.4f*n,.15f*n});}
+    for(int i=0;i<800;++i){const float n=i%2?1.f:-1.f;manual.tick({.4f+.55f*n,.2f-.4f*n,.15f*n});}
     gl_get_diagnostics(manual.c,&d);CHECK(d.calibration_state==GL_CAL_COMPLETE);
     near(d.bias.x,.4,.025);near(d.bias.y,.2,.025);
     // Repeated vibration is not stationary, even if its average is near zero.
     Fixture vibration;vibration.device();vibration.set("calibration.automatic",GL_CAL_ANYTIME);
     for(int i=0;i<800;++i)vibration.tick({i%2?2.f:-1.5f,0,0});
     gl_get_diagnostics(vibration.c,&d);CHECK(!d.stationary);near(d.bias.x,0);
+}
+static void manual_noisy_bias(){
+    // Stationary offset/noise can exceed the automatic learner's safe limits.
+    for(uint64_t step:{4000000ull,10000000ull,20000000ull}){
+        Fixture f;f.device();f.prime();CHECK(gl_begin_calibration(f.c)==GL_OK);
+        for(unsigned i=0;i<45000000000ull/step;++i){
+            const float n=i%2?2.f:-2.f;
+            f.tick({4.5f+n,.2f,-.3f},step);
+        }
+        gl_diagnostics d{};gl_get_diagnostics(f.c,&d);
+        CHECK(d.calibration_state==GL_CAL_COMPLETE);
+        near(d.bias.x,4.5,.05);near(d.bias.y,.2,.05);near(d.bias.z,-.3,.05);
+        auto output=f.tick({4.5f,.2f,-.3f},step);
+        near(output.pitch_degrees,0,.001);near(output.yaw_degrees,0,.001);
+    }
+    // Deterministic random noise and accelerometer jitter, not just alternating
+    // samples whose means cancel exactly. The estimate must finish and agree
+    // within three times the required uncertainty of the accumulated mean.
+    Fixture random;random.device();random.prime();CHECK(gl_begin_calibration(random.c)==GL_OK);
+    uint32_t seed=0x61d04;
+    for(unsigned i=0;i<10000;++i){
+        seed=1664525u*seed+1013904223u;
+        const float n=float(seed>>8)/16777216.f*5-2.5f;
+        random.now+=4000000;
+        random.submit(1,{4.5f+n,.2f,-.3f},{.002f*n,1+.004f*n,0});
+        random.report();CHECK(gl_update(random.c,random.now,&random.host,&random.out)==GL_OK);
+    }
+    gl_diagnostics d{};gl_get_diagnostics(random.c,&d);
+    CHECK(d.calibration_state==GL_CAL_COMPLETE);near(d.bias.x,4.5,.15);
+    // A real tilt and high-amplitude movement must not become a manual bias.
+    for(bool impulse:{false,true}){
+        Fixture moved;moved.device();moved.prime();CHECK(gl_begin_calibration(moved.c)==GL_OK);
+        for(int i=0;i<1600;++i){
+            const double angle=i*.01*3*std::numbers::pi/180;
+            moved.now+=10000000;
+            moved.submit(1,{impulse?25.f:3.f,0,0},{0,float(std::cos(angle)),float(std::sin(angle))});
+            moved.report();CHECK(gl_update(moved.c,moved.now,&moved.host,&moved.out)==GL_OK);
+        }
+        gl_get_diagnostics(moved.c,&d);
+        CHECK(d.calibration_state!=GL_CAL_COMPLETE);near(d.bias.x,0);
+    }
 }
 static void flick(){
     Fixture f(false);f.device();f.mode(10,"Aim",10);f.mode(20,"Explore",0);f.state(20,true);
@@ -1152,7 +1193,7 @@ static void controller_display_reconnect(){
 }
 int main(){
     unsigned failures=0;
-    for(auto test:{controller_display_reconnect,gamepad_menu_shortcut,temporal,gains_and_spaces,activation,source_selection,calibration,noisy_calibration,flick,block_long_press,settings,gameplay_contexts,context_flick,steam_adapter,gyro_spaces,button_names,sensitivity_range,cursor_routing,profile_persistence,independent_profiles,no_hidden_profile,cursor_profile_metadata,activation_split,shared_toggle,automatic_persistence,motion_companions,automatic_motion_sensor,companion_activators,controller_takeover,touchpad_flick,choice_help,menu_camera_routing}){
+    for(auto test:{controller_display_reconnect,gamepad_menu_shortcut,temporal,gains_and_spaces,activation,source_selection,calibration,noisy_calibration,manual_noisy_bias,flick,block_long_press,settings,gameplay_contexts,context_flick,steam_adapter,gyro_spaces,button_names,sensitivity_range,cursor_routing,profile_persistence,independent_profiles,no_hidden_profile,cursor_profile_metadata,activation_split,shared_toggle,automatic_persistence,motion_companions,automatic_motion_sensor,companion_activators,controller_takeover,touchpad_flick,choice_help,menu_camera_routing}){
         try{test();}catch(const std::exception& e){std::cerr<<e.what()<<'\n';++failures;}
     }
     if(failures)return 1;

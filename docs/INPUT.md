@@ -149,7 +149,7 @@ int result = gl_sdl_attach_window(reader, sdl_window);
 ```
 
 The supplied Windows SDL runtime exposes a per-window input extension. GyroLib
-handles identification, filtering, conversion and cursor confinement inside the
+handles identification, filtering, conversion and injected cursor suppression inside the
 DLL. The host continues consuming its usual camera/cursor output and SDL events.
 Neither its event filter nor its Windows message hook is replaced. SDL owns raw
 mouse registration while the window is attached, including outside relative mode
@@ -164,7 +164,7 @@ binding automatically. The context must outlive the reader.
 
 One bridge may own a context or window, including the DX12 bridge. The call returns
 `GL_UNAVAILABLE` for an occupied context/window, an external SDL without the
-extension, a non-Windows runtime or SDL's GameInput mouse backend. Ordinary
+extension, a non-Windows runtime, an unavailable Windows mouse hook or SDL's GameInput mouse backend. Ordinary
 controller acquisition remains usable when attachment fails. A non-Steam shortcut
 does not require a Steamworks SDK for this path.
 

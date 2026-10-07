@@ -2,6 +2,33 @@
 
 [Documentation](INDEX.md) / Maintenance
 
+## Unreleased
+
+- Recalibrate gyro now accepts fresh sensor data polled before the current core
+  update. Previously the action compared it with the preceding frame's clock,
+  rejected the click, and the panel reverted after its optimistic first frame.
+- Steam mouse Block/Convert intercepts identified injected movement before it
+  moves the system cursor, including in menus. Raw counts remain available for
+  conversion, without a second native mouse effect. Physical mouse input and
+  the settings panel remain usable; the bridge no longer confines the cursor.
+- Manual calibration tolerates a larger stationary bias and gyro noise, while
+  collecting longer to reduce uncertainty in the measured offset.
+- Completed manual measurements are saved per identifiable SDL sensor and
+  restored after reconnect/restart. A new manual calibration remeasures the raw
+  stream; cancellation or movement retains the previous completed result.
+  Automatic learning uses the manual bias/noise as a reference for bounded
+  residual correction, without overwriting the saved manual result. Sensors
+  without a serial remain session-only; duplicate identities cannot reuse a bias.
+- Steam mouse Block remains active for a reported view even when camera output
+  is disallowed or paused. Convert discards movement while output is unavailable;
+  it never replays it on resume. Physical HID mice and the library panel remain
+  available. Hosts must report menu identity independently of camera permission.
+
+These fixes have synthetic coverage; affected controller hardware still needs
+validation. ABI 1 is retained. The additive
+`gl_set_endpoint_calibration_identity` API supports custom SDL-source producers;
+the built-in acquisition paths supply identity automatically.
+
 ## 1.2.2 — 6 October 2026
 
 Fixes Steam Input mouse blocking not taking effect until the settings panel had been opened in an SDL host using relative mouse mode.

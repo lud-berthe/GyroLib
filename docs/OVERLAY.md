@@ -100,7 +100,7 @@ of the renderer or settings frontend, including a non-Steam shortcut. See
 not attach either input bridge.
 
 Detection correlates at least three relative raw movements without a device
-handle and injected mouse messages while the selected controller has Steam Input
+handle and injected mouse movement while the selected controller has Steam Input
 metadata. The originating binding may be a stick, touchpad, gyro or another mouse
 mapping. Without Steam metadata, a right/single-pad contact remains a fallback
 for confirming the previously tested touchpad path. It runs in all three modes and while the panel is open.
@@ -135,13 +135,29 @@ conversion: for example, touchpad flick plus touchpad-to-mouse, or GyroLib gyro
 plus Steam gyro-to-mouse. Block suppresses matching mouse motion while preserving
 GyroLib motion. Buttons and wheel packets pass through.
 
-Pause, loss of focus, an unavailable output destination or the library panel
-suspend interception. Camera-enabled game menus follow their view's setting.
-Cursor confinement applies only in gameplay camera views for Block/Convert
-movement. It ends on inactivity, physical-mouse activity, menus, F10, Alt-Tab and shutdown,
-restoring the previous host restriction only if it has not changed meanwhile.
-The cursor can still move within the game window. A 250 ms physical-mouse
-preference prevents immediate confinement from residual touchpad inertia.
+A reported active view keeps its **Block** policy during pause and while camera
+output is disallowed. **Convert movement** also consumes identified Steam motion
+in those states, but discards it without generating or queuing camera/cursor
+output. **Pass through** stays available. The host must keep reporting the menu
+view when its background camera is locked; camera permission is a separate flag.
+Loss of focus, stale host updates, no active view or the library panel suspend
+interception. Physical mouse motion and button/wheel packets remain untouched.
+Unreleased: the Windows bridge also intercepts confirmed injected movement
+before it changes the system cursor or reaches legacy mouse input. Filtering
+only window messages left games polling the cursor position able to observe it.
+Raw movement still reaches the bridge for conversion, once per packet, including
+while the system cursor is stationary. This applies in menus as well as gameplay;
+only the declared camera/cursor output receives converted movement.
+
+The bridge owns a dedicated [low-level mouse hook](https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelmouseproc)
+thread. Its callback checks injected motion, foreground window and a short-lived
+policy snapshot; it never locks the bridge or calls host code. Hardware movement,
+buttons and wheel events continue through the hook. No cursor warping or extra
+confinement is applied, and host-owned restrictions are left alone. The hook is
+removed when the bridge is destroyed; initialization fails explicitly if it
+cannot be installed. Panel opening/detachment clears interception immediately,
+and a host update gap greater than 100 ms expires it. Before initial stream
+confirmation, input still passes through as described above.
 
 ## Resize and shutdown
 

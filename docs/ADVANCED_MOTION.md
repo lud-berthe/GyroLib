@@ -77,8 +77,9 @@ and UI navigation, and discards pending taps on focus loss or controller takeove
 ## Calibration
 
 Manual calibration gives five seconds to place the controller, then collects
-one second of accepted stillness with at least 20 samples. Movement restarts
-collection. Begin/Cancel actions and diagnostics expose countdown, stationarity
+at least one second of accepted stillness with at least 20 samples. Noisy
+sensors are measured longer until the estimated uncertainty of the accumulated
+gyro mean is at most 0.05 deg/s. Movement restarts collection. Begin/Cancel actions and diagnostics expose countdown, stationarity
 and progress; no debug display is imposed.
 
 Automatic calibration defaults to Off. Any time needs no menu hook. Menus only
@@ -91,7 +92,9 @@ activator is released. Pausing or opening the library panel suspends the cursor
 and allows calibration again. An enabled menu camera is also excluded from idle
 menu calibration.
 
-Both paths use time-weighted gyro/acceleration statistics over 250 ms windows:
+Both paths use time-weighted gyro/acceleration statistics over 250 ms windows.
+Without a successful manual reference, automatic learning retains these
+conservative limits:
 
 | Test | Limit |
 |---|---|
@@ -100,9 +103,38 @@ Both paths use time-weighted gyro/acceleration statistics over 250 ms windows:
 | Acceleration | Near 1 g; noise below 0.025 g RMS |
 | Window mean relative to the initial stable window | Within 0.35 deg/s and 0.02 g |
 
+Explicit manual placement accepts a mean below 10 deg/s and gyro noise below
+3 deg/s RMS, with a 20 deg/s impulse limit. Its cross-window gyro-mean check
+accounts for the measurement uncertainty (three standard errors, at least
+0.35 deg/s); acceleration and gravity-direction checks remain unchanged. This
+lets a stable sensor with substantial offset/noise be measured without widening
+normal automatic learning or adding a dead zone to camera output. The mean-error
+estimate assumes independent noise samples; correlated noise and constant yaw
+remain limitations. A noisy sensor can take several seconds or tens of seconds
+after the countdown. Keep it on a stationary surface until completion.
+
+Every manual request measures the raw stream again, including its noise. Only a
+completed measurement replaces the previous reference; movement, cancellation
+or disconnection retain the last completed result. When a reliable individual
+sensor identity is available, the result is saved and restored from the normal
+[settings file](SETTINGS.md#manual-calibration-memory). Otherwise it remains in
+the current endpoint's memory. Steam samples never use this local reference.
+
+With a manual reference, automatic stillness is assessed relative to its bias.
+The noise limit follows the measured RMS (1.25 times, bounded between 0.9 and
+3 deg/s); acceleration and gravity-direction checks still apply. Before each
+automatic adjustment, stable windows are averaged for at least one second and
+until the estimated mean uncertainty is at most 0.05 deg/s. Corrections stay
+within 0.5 deg/s of the manual bias and, during active gyro use, within 0.15 deg/s
+of the current correction. Accepted averages are blended with the usual two- or
+eight-second time constant. Each accepted/rejected estimate starts a new batch.
+Automatic refinements are session-only: they never overwrite the saved manual
+measurement. The host calibration veto applies to this path too.
+
 Large impulses cancel collection immediately; stream gaps clear its window.
-After one second of accepted windows, automatic bias correction uses a two-second
-time constant outside active gyro use. During active use outside a safe menu,
+Without a manual reference, automatic bias correction starts after one second
+of accepted windows, with a two-second time constant outside active gyro use.
+During active use outside a safe menu,
 only residual drift within 0.15 deg/s is accepted, with an eight-second constant.
 The host can veto automatic learning for one update with
 `gl_set_auto_calibration_allowed(context, 0)`; the veto then clears and does not
