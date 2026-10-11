@@ -58,6 +58,7 @@ void gl_context::profiles_changed(const Profiles& previous){
         for(int f=0;f<SettingCount;++f)if(profile_setting(f)&&current[f]!=it->second[f]){
             emit(GL_EVENT_SETTING,f,0,current[f],state.setting_ids[f].c_str());
             if(id==active_view){
+                if(auto* e=endpoint(active))e->motion.delivery.clear();
                 if(f==RecenterButton)recenter_primed=false;
                 if(f==Activation||(f>=Button&&f<=BlockLongPress)||f==Trigger||f==TriggerThreshold)reset_controls=true;
             }

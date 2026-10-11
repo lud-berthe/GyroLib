@@ -8,6 +8,25 @@ new game's hook correctness or input-to-photon latency.
 
 ## Latest SDK results
 
+Release **1.3.1**, 11 October 2026: Windows x64 Release binaries pass **57/57**
+bundled-DLL, **57/57** full-static and **24/24** core-static tests. Fresh SDKs
+were installed and relocated; their independent C/C++, DX12 and public API audit
+suites pass **28/28** checks. The installed demo smoke test passes too.
+
+Both issue regressions failed before their fixes. INI coverage checks explicit
+and default Off, stale fast values and thresholds, inherited sensitivities and
+save/reload roundtrips. The user's actual demo INI (base sensitivity 2.5, fast
+sensitivity 60, acceleration 0) loads as Custom with the old DLL and Off with the
+corrected DLL. The user confirmed Off in the updated demo.
+
+Synthetic burst tests preserve the total yaw/pitch angle, avoid duplicate output
+at the same timestamp, retain immediate delivery for regular streams and clear
+queued motion on suspension/transitions. With 30 ms bursts and 5 ms updates,
+zero-output updates during steady motion fall from 83.4% to 0%. Irregular bursts
+at 60, 120 and 240 Hz leave 0-2.4% zero-output updates. These are synthetic timing
+measurements, not Switch Pro hardware acceptance or input-to-photon latency.
+Physical Switch Pro Bluetooth testing remains pending.
+
 Release **1.3.0**, 8 October 2026: rebuilt Windows x64 Release binaries pass
 **56/56** bundled-DLL, **56/56** full-static and **23/23** core-static tests.
 Fresh installed SDKs were relocated before testing; their C/C++, DX12 and public

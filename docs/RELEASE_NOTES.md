@@ -2,6 +2,34 @@
 
 [Documentation](INDEX.md) / Maintenance
 
+## 1.3.1 — 11 October 2026
+
+- Fix [#2](https://github.com/lud-berthe/GyroLib/issues/2): loading an INI with
+  acceleration Off and stale fast sensitivities keeps it Off, including after
+  saving/reloading and through inherited profiles. The user confirmed Off
+  in the updated demo with a manually edited profile and retained fast values.
+- Address [#1](https://github.com/lud-berthe/GyroLib/issues/1): automatically pace
+  repeated SDL gyro bursts across updates without sensor reports, preserving the
+  integrated angle. The adaptive 15–60 ms delivery window trades a small delay
+  for smoother output. Pending movement is discarded on suspension/transitions.
+  See [burst delivery](INPUT.md#burst-delivery) for behavior and limits. Synthetic
+  regressions cover regular/irregular bursts; real Switch Pro testing is pending.
+
+Validation: **57/57** bundled DLL, **57/57** full-static and **24/24** core-static
+tests pass, plus **28/28** installed-SDK checks and the demo smoke test.
+
+### Update
+
+Close the host and replace `gyrolib.dll`; retain `gyrolib.ini` and license notices.
+ABI 1, public signatures and INI schema 0.2.0 are unchanged. Continue calling
+`gl_update` every camera update and apply each returned delta, including updates
+where `gl_gyro_state.new_samples` is zero. The delivery buffer can produce motion
+between sensor arrivals; `gl_output.gyro_active` includes that paced output.
+
+The Windows x64 release includes the DLL, SDK, demo and SHA-256 checksums.
+Switch Pro Bluetooth acceptance on physical hardware is pending. Linux and
+Proton remain unvalidated.
+
 ## 1.3.0 — 8 October 2026
 
 - Recalibrate gyro now accepts fresh sensor data polled before the current core

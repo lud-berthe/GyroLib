@@ -182,8 +182,9 @@ Use `gl_get_diagnostics`, `gl_get_input_metrics` and `gl_poll_event_ex` for logg
 Metrics report acquisition frequency, jitter, clock qualification and sample age,
 not input-to-photon latency. Sample/event queues are bounded; rejected and dropped
 counts help diagnose gaps. `gl_get_gyro_state.enabled` is a stable permission for
-indicators, while `gl_output.gyro_active` reports processed samples and can be zero
-between reports. Continue updating during menus and pause.
+indicators, while `gl_output.gyro_active` reports processed or paced gyro output.
+With [burst delivery](INPUT.md#burst-delivery), an update can return motion even
+when `gl_gyro_state.new_samples` is zero. Continue updating during menus and pause.
 
 ## Events
 

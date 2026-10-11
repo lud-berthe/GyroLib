@@ -9,7 +9,7 @@ Motion::Motion() {
     fusion_.SetCalibrationMode(GamepadMotionHelpers::CalibrationMode::Manual);
     fusion_.PauseContinuousCalibration();
 }
-void Motion::clear_smoothing() { filter_.reset(); }
+void Motion::clear_smoothing() { filter_.reset(); delivery.clear(); }
 void Motion::restore_calibration(const std::optional<ManualCalibration>& value) {
     manual_reference_=value;
     diagnostics.bias=value?value->bias:gl_vec3{};
@@ -19,7 +19,7 @@ void Motion::restore_calibration(const std::optional<ManualCalibration>& value) 
 }
 void Motion::resume() {
     previous_ns_=0; gravity_ready_=false; clear_smoothing(); stillness_.reset();
-    clock_.resume();
+    clock_.resume();delivery.reset();
     still_time_=collect_time_=mean_error_=noise_sum_=auto_error_=0; count_=0; mean_=auto_mean_={}; diagnostics.stationary=0;
     clear_trackball();
 }
@@ -40,6 +40,7 @@ void Motion::process(const gl_sample& s,const Settings& v,bool steam,bool menu,b
     // remains usable; ordinary activation changes never enter this branch.
     if(std::hypot(s.accel_g.x,s.accel_g.y,s.accel_g.z)<.05)gravity_ready_=false;
     if (!gravity_ready_) gravity_ready_=fusion_.InitializeGravityFromAcceleration(s.accel_g.x,s.accel_g.y,s.accel_g.z);
+    if(!steam)delivery.observe(s);
     if (!previous_ns_) { previous_ns_=s.sensor_ns;if(!steam)clock_.observe(s.sensor_ns,s.arrival_ns);return; }
     if (s.sensor_ns<=previous_ns_) { ++diagnostics.rejected_samples; return; }
     double dt=(s.sensor_ns-previous_ns_)*1e-9; previous_ns_=s.sensor_ns;

@@ -9,6 +9,7 @@ adds SDL and Steam rotations from the same controller.
 - [Choose the readers](#choose-the-readers)
 - [Endpoints and physical identity](#endpoints-and-physical-identity)
 - [Controller selection and source health](#controller-selection-and-source-health)
+- [Burst delivery](#burst-delivery)
 - [Physical controls and capabilities](#physical-controls-and-capabilities)
 - [SDL ownership and event handling](#sdl-ownership-and-event-handling)
 - [Steam Input provider](#steam-input-provider)
@@ -83,6 +84,31 @@ Gravity-dependent spaces also need fresh acceleration. Alternate motion samples
 qualify source health but are not applied or replayed. Paired endpoints can
 supplement controls; control states expire after 150 ms. A data stall alone does
 not change the selected controller.
+
+## Burst delivery
+
+Some Bluetooth controllers, including Switch Pro, deliver several regularly
+sampled gyro reports together. Smoothing sensor velocity alone cannot fill the
+render updates between those deliveries. The core detects repeated SDL-source
+bursts separated by updates without samples and automatically spreads their
+integrated camera/cursor angles across subsequent updates.
+
+The delivery window follows observed burst spacing, bounded to 15–60 ms. This
+adds approximately half a window of average delay, plus render scheduling. Long
+gaps can still produce uneven movement. No velocity is extrapolated: after the
+buffer drains, the total angle equals the integrated received motion. Normal
+streams, frame batching without empty updates, and Steam motion retain immediate
+output. Detection restarts when the sensor/source restarts.
+
+Call `gl_update` on every camera update, even when no reports arrived. Apply each
+returned delta once. `gl_gyro_state.new_samples` remains the number of actual
+processed reports; a zero count does not imply zero output while a burst drains.
+Pending motion is discarded on suspension, calibration, source/view/destination
+changes, active-profile edits, modifier changes and host stalls over 100 ms.
+Flick stick, trackball and converted mouse movement are not buffered.
+
+This behavior has synthetic coverage; physical Switch Pro Bluetooth validation
+is still required.
 
 ## Physical controls and capabilities
 

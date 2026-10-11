@@ -2,6 +2,7 @@
 #include "stillness.hpp"
 #include "filter.hpp"
 #include "sensor_clock.hpp"
+#include "delivery.hpp"
 #include "activation.hpp"
 #include "gyrolib/gyrolib.h"
 #include "flick.hpp"
@@ -66,6 +67,7 @@ class Motion {
     double track_x_{},track_y_{};
 public:
     gl_diagnostics diagnostics{};
+    MotionDelivery delivery;
     Motion();
     void resume();
     void begin();

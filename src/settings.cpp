@@ -653,6 +653,8 @@ int32_t GL_CALL gl_load_settings(gl_context* c,const char* path) try {
         profile[Enabled]=int(profile[Activation])!=GL_GYRO_OFF;
         if(links.count(id))continue; // Partial inherited rows resolve against the parent below.
         if(profile[FlickStickInner]>=profile[FlickStickOuter]||profile[FlickPadInner]>=profile[FlickPadOuter])return GL_INVALID;
+        // Off is authoritative even when a hand-edited INI retains old curve values.
+        if(profile[Acceleration]==0){apply_acceleration_preset(profile);continue;}
         if(profile[Acceleration]<4){
             auto preset=profile;apply_acceleration_preset(preset);
             if(auto fields=edits.find(id);fields!=edits.end())

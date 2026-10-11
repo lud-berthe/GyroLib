@@ -535,6 +535,7 @@ int32_t GL_CALL gl_update(gl_context* c,uint64_t now,const gl_host_state* host,g
     held|=side_held(pulled,int(v[Trigger]));controls_fresh|=triggers.timestamp_ns!=0;
     const auto output_target=c->effective_output_target(profile);
     if(c->previous_output_target!=output_target){
+        if(chosen)chosen->motion.delivery.clear();
         c->previous_output_target=output_target;c->flick.reset();c->flick_touchpad.reset();c->controls_primed=false;c->safe_previous=false;
         for(auto& gate:c->long_press_blockers)gate.cancel();
     }
@@ -581,6 +582,7 @@ int32_t GL_CALL gl_update(gl_context* c,uint64_t now,const gl_host_state* host,g
         if(previous_cal!=GL_CAL_COMPLETE&&d.calibration_state==GL_CAL_COMPLETE)c->remember_calibration(*chosen);
         const bool calibrating=d.calibration_state==GL_CAL_COUNTDOWN||d.calibration_state==GL_CAL_COLLECTING||d.calibration_state==GL_CAL_MOVING;
         c->gyro_state={uint32_t(gate&&!calibrating),uint32_t(gravity_ok),uint32_t(d.accepted_samples-accepted),uint32_t(gate&&!calibrating&&track_axes!=0)};
+        chosen->motion.delivery.update(now,gate&&!calibrating,modifiers,*output);
         if(gate&&!calibrating)chosen->motion.trackball(dt,v[TrackballDecay],track_axes,*output);
         else chosen->motion.clear_trackball();
         if(previous_cal!=d.calibration_state)c->emit(GL_EVENT_CALIBRATION,static_cast<int>(d.calibration_state),next);

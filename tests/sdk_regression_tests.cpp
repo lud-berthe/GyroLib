@@ -156,6 +156,27 @@ static void partial_ini_presets(){
     CHECK(f.get("context.2.gyro.acceleration")==1);CHECK(f.get("context.2.gyro.fast_sensitivity_x")==9);
     std::filesystem::remove(path);
 }
+static void disabled_ini_acceleration_stays_off(){
+    Fixture f;const auto path=std::filesystem::current_path()/"sdk-disabled-acceleration.ini";
+    for(bool explicit_off:{false,true})for(bool inherited:{false,true}){
+        {std::ofstream out(path);out<<"schema=0.2.0\ncontext.1.sensitivity_x=0.5\ncontext.1.sensitivity_y=0.5\n";
+            if(explicit_off)out<<"context.1.gyro.acceleration=0\n";
+            out<<"context.1.gyro.fast_sensitivity_x=2.5\ncontext.1.gyro.fast_sensitivity_y=2.5\n"
+                "context.1.gyro.slow_threshold_dps=10\ncontext.1.gyro.fast_threshold_dps=100\n";
+            if(inherited)out<<"context.2.inherit=1\ncontext.2.sensitivity_x=0.4\n";}
+        for(int round=0;round<2;++round){
+            CHECK(gl_load_settings(f.c,path.string().c_str())==GL_OK);
+            CHECK(f.get("context.1.gyro.acceleration")==0);
+            CHECK(f.get("context.1.sensitivity_x")==.5);
+            CHECK(f.get("context.1.sensitivity_y")==.5);
+            CHECK(f.get("context.1.gyro.fast_sensitivity_x")==.5);
+            CHECK(f.get("context.1.gyro.fast_sensitivity_y")==.5);
+            if(inherited){CHECK(f.get("context.2.gyro.acceleration")==0);CHECK(f.get("context.2.gyro.fast_sensitivity_x")==.4);}
+            CHECK(gl_save_settings(f.c,path.string().c_str())==GL_OK);
+        }
+    }
+    std::filesystem::remove(path);
+}
 static void complementary_flick_sources(){
     Fixture f;f.device(1,GL_SOURCE_SDL,1);f.device(2,GL_SOURCE_SDL,2);
     gl_endpoint e{};CHECK(gl_get_endpoint(f.c,1,&e)==GL_OK);e.caps.sticks=0;e.caps.touchpads=GL_RIGHT;
@@ -381,7 +402,7 @@ static void global_output_target_notifications(){
     CHECK(flick_visible(1)==0);CHECK(flick_visible(2)==1);CHECK(flick_visible(3)==1);
 }
 int main()try{contacts_preserve_preferences();complete_event_ids();stale_flick_fallback();
-    contact_edits_replace_alias();inheritance_has_no_hidden_curve_override();partial_ini_presets();complementary_flick_sources();model_notifications();
+    contact_edits_replace_alias();inheritance_has_no_hidden_curve_override();partial_ini_presets();disabled_ini_acceleration_stays_off();complementary_flick_sources();model_notifications();
     local_acceleration_presets_follow_sensitivity();custom_transition_preserves_effective_curve();
     delayed_flick_reports();delayed_flick_does_not_replay_animation_time();delayed_flick_uses_report_speed_for_smoothing();
     forgetting_endpoints_notifies();global_output_target_notifications();return 0;}

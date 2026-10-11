@@ -147,7 +147,7 @@ typedef struct gl_output {
 } gl_output;
 /* Query after update. enabled is a stable permission with a qualified source,
  * independent of whether that frame received a sensor report. The legacy
- * output.gyro_active describes processed gyro samples, not this permission.
+ * output.gyro_active describes processed or paced gyro output, not this permission.
  * new_samples counts reports processed by the last update. */
 typedef struct gl_gyro_state {
     uint32_t enabled,motion_available,new_samples,trackball_active;

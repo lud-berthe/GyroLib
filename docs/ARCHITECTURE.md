@@ -74,6 +74,11 @@ halves prevents batching/delay steps from becoming sensitivity changes. There
 are no controller-name gain coefficients. Steam uses the host clock and receives
 no local bias calibration.
 
+`detail/delivery.hpp` detects repeated SDL arrival bursts separated by empty
+updates. It distributes integrated angles over a bounded delivery window without
+reprocessing samples or predicting velocity. Output gates and transitions clear
+pending angles; flick, trackball and mouse conversion remain outside that window.
+
 View/effective settings are resolved once per update. Controller metadata refreshes
 on discovery/remap and a 500 ms fallback; per-poll work reads live controls.
 [Motion processing](ADVANCED_MOTION.md) specifies filters and calibration.

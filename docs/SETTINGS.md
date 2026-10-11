@@ -83,6 +83,12 @@ See [menu availability](MENUS.md#controller-availability).
 Setters reject nonfinite or out-of-range values and round to the advertised step. Coupled settings, such as an acceleration preset and its curve, are updated
 together. Use stable setting IDs; labels and list positions may change.
 
+When editing the INI, `context.<id>.gyro.acceleration=0` keeps acceleration off
+regardless of retained fast sensitivities or thresholds. With acceleration off,
+fast values resolve to the base sensitivities. An enabled preset with explicitly
+edited curve components still resolves to Custom; `gyro.acceleration=4` selects
+Custom directly.
+
 ## Manual calibration memory
 
 A completed manual calibration saves the three-axis bias and measured noise in
