@@ -6,7 +6,7 @@
 
 namespace gyrolib {
 // Time-weighted 250 ms windows separate sensor noise from sustained motion.
-// No dead zone is applied to the motion delivered to the host.
+// Stillness checks are independent of the output speed deadzone.
 class Stillness {
     double elapsed_{},anchor_error_{};
     unsigned samples_{};

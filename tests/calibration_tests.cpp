@@ -8,7 +8,10 @@
 #include <iostream>
 #include <stdexcept>
 #define CHECK(x) do{if(!(x))throw std::runtime_error(std::to_string(__LINE__)+": " #x);}while(0)
-static void near(double a,double b,double tolerance=.001){CHECK(std::abs(a-b)<tolerance);}
+static void near(double actual,double expected,double tolerance=.001){
+    if(std::abs(actual-expected)>=tolerance)
+        throw std::runtime_error("Expected "+std::to_string(expected)+", got "+std::to_string(actual));
+}
 struct Fixture {
     gyrolib::Context owner;gl_context* c=owner.get();uint64_t now=1000000000,id=1;
     gl_host_state host{};gl_output output{};
@@ -81,6 +84,77 @@ int main()try{
     struct Cleanup {fs::path path;~Cleanup(){std::error_code ec;fs::remove_all(path,ec);}} cleanup{root};
     const auto ini=root/"gyrolib.ini",bad=root/"bad.ini";
     using gyrolib_sdl_detail::calibration_identity;
+    {
+        // Reproduce the reported 0.18 deg/s step while gyro is active and stationary.
+        for(bool referenced:{false,true}){
+            Fixture f;
+            f.device(1,0);
+            if(referenced)f.calibrate(.44f);
+            CHECK(gl_setting_set(f.c,"calibration.automatic",GL_CAL_ANYTIME)==GL_OK);
+            f.host.camera_allowed=0;
+            for(int i=0;i<6000;++i)f.tick({.44f,.2f,-.3f});
+            f.host.camera_allowed=1;
+            const auto initial=f.diagnostics().bias.x;
+            near(initial,.44,.005);
+            // A partially filled window can straddle the step and accept a
+            // small correction. Once the full residual is visible it must stall.
+            for(int i=0;i<500;++i)f.tick({.62f,.2f,-.3f});
+            const auto stalled=f.diagnostics().bias.x;
+            near(stalled,initial,.01);
+            for(int i=0;i<1500;++i)f.tick({.62f,.2f,-.3f});
+            CHECK(f.diagnostics().stationary);
+            near(f.diagnostics().bias.x,stalled);
+            CHECK(gl_setting_set(f.c,"calibration.active_residual_limit_dps",.25)==GL_OK);
+            CHECK(gl_setting_set(f.c,"calibration.active_time_constant_s",2)==GL_OK);
+            for(int i=0;i<2000;++i)f.tick({.62f,.2f,-.3f});
+            near(f.diagnostics().bias.x,.62,.01);
+        }
+    }
+    {
+        // Relaxing the reference range still leaves the saved manual offset intact.
+        Fixture f;
+        const auto reference_ini=root/"reference-range.ini";
+        f.device(1,1);
+        f.calibrate(.44f);
+        CHECK(gl_save_settings(f.c,reference_ini.string().c_str())==GL_OK);
+        const auto reference=row(read(reference_ini));
+        CHECK(gl_setting_set(f.c,"calibration.automatic",GL_CAL_ANYTIME)==GL_OK);
+        f.host.camera_allowed=0;
+        for(int i=0;i<3000;++i)f.tick({1.04f,.2f,-.3f});
+        near(f.diagnostics().bias.x,.44,.01);
+        CHECK(gl_setting_set(f.c,"calibration.manual_reference_limit_dps",.75)==GL_OK);
+        for(int i=0;i<3000;++i)f.tick({1.04f,.2f,-.3f});
+        near(f.diagnostics().bias.x,1.04,.01);
+        CHECK(row(read(reference_ini))==reference);
+    }
+    {
+        const auto options=root/"options.ini";
+        const char* keys[]={"calibration.active_residual_limit_dps","calibration.active_time_constant_s",
+                            "calibration.manual_reference_limit_dps"};
+        const double defaults[]={.15,8,.5},custom[]={.25,2,.75};
+        Fixture f;
+        const auto check_values=[&](gl_context* c,const double* expected){
+            for(int i=0;i<3;++i){
+                double value{};
+                CHECK(gl_setting_get(c,keys[i],&value)==GL_OK);
+                near(value,expected[i]);
+            }
+        };
+        check_values(f.c,defaults);
+        for(int i=0;i<3;++i)CHECK(gl_setting_set(f.c,keys[i],custom[i])==GL_OK);
+        CHECK(gl_save_settings(f.c,options.string().c_str())==GL_OK);
+        Fixture loaded;
+        CHECK(gl_load_settings(loaded.c,options.string().c_str())==GL_OK);
+        check_values(loaded.c,custom);
+        CHECK(gl_capture_recommended_settings(loaded.c)==GL_OK);
+        gl_reset_settings(loaded.c);
+        check_values(loaded.c,defaults);
+        CHECK(gl_apply_recommended_settings(loaded.c)==GL_OK);
+        check_values(loaded.c,custom);
+        write(bad,"schema=0.2.0\ncalibration.active_residual_limit_dps=0.5\ncalibration.active_time_constant_s=0\n");
+        CHECK(gl_load_settings(loaded.c,bad.string().c_str())==GL_INVALID);
+        check_values(loaded.c,custom);
+    }
     const auto key1=calibration_identity(0x057e,0x2009,"serial-a");
     const auto key2=calibration_identity(0x057e,0x2009,"serial-b");
     CHECK(key1&&key2&&key1!=key2);CHECK(key1==calibration_identity(0x057e,0x2009,"serial-a"));

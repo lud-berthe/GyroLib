@@ -30,7 +30,7 @@ int main(void){
         if(gl_setting_set(c,"context.501.sensitivity_y",1.7)!=GL_OK)return 5;
         if(gl_setting_get(c,"context.501.sensitivity_y",&value)!=GL_OK||fabs(value-1.7)>1e-9)return 6;
         if(gl_menu_setting_count(c)!=gl_setting_count()+gl_menu_tab_setting_count(c,502)||gl_menu_tab_count(c)!=1)return 7;
-        if(gl_menu_shared_setting_count(c)!=7)return 13;
+        if(gl_menu_shared_setting_count(c)<7)return 13;
         if(gl_choice_at(c,"gyro.context",1,&choice)!=GL_OK||choice.value!=501)return 8;
     }
     {

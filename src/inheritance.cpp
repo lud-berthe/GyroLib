@@ -121,7 +121,7 @@ int32_t GL_CALL gl_setting_inherit(gl_context* c,const char* key)try{
 }catch(...){return GL_LIMIT;}
 int32_t GL_CALL gl_capture_recommended_settings(gl_context* c)try{
     if(!c)return GL_INVALID;if(c->gameplay_contexts.empty())return GL_UNAVAILABLE;
-    c->recommended=RecommendedSettings{c->context_settings,c->profile_links,c->settings[AutoCal]};
+    c->recommended=RecommendedSettings{c->context_settings,c->profile_links,c->settings};
     c->emit(GL_EVENT_CONTEXT,7);return GL_OK;
 }catch(...){return GL_LIMIT;}
 uint32_t GL_CALL gl_has_recommended_settings(const gl_context* c){return c&&c->recommended.has_value();}
@@ -130,8 +130,11 @@ int32_t GL_CALL gl_apply_recommended_settings(gl_context* c)try{
     const auto before=c->profile_snapshot();
     for(const auto& [id,settings]:c->recommended->profiles){c->context_settings[id]=settings;c->profile_links.erase(id);}
     for(const auto& [id,link]:c->recommended->links)c->profile_links[id]=link;
-    c->settings[AutoCal]=c->recommended->calibration;c->profiles_changed(before);
-    c->emit(GL_EVENT_SETTING,AutoCal,0,c->settings[AutoCal],"calibration.automatic");
+    for(auto field:calibration_settings){
+        c->settings[field]=c->recommended->settings[field];
+        c->emit(GL_EVENT_SETTING,field,0,c->settings[field],definitions[field].id);
+    }
+    c->profiles_changed(before);
     c->emit(GL_EVENT_CONTEXT,6);return c->save_change();
 }catch(...){return GL_LIMIT;}
 }

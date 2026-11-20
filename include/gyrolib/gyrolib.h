@@ -240,10 +240,10 @@ GL_API int32_t GL_CALL gl_set_auto_calibration_allowed(gl_context*,uint32_t allo
  * API. Place each group beside its main control. Zoom is an ordinary camera
  * row. Unknown IDs return NONE. No C ABI 1 structs are changed. */
 /* MODIFIERS is a reserved legacy group. Respect each child's visible flag;
- * Off features have no visible children and no expander. */
+ * An expander remains useful whenever any of its children are visible. */
 enum { GL_ADVANCED_NONE=0, GL_ADVANCED_SMOOTHING=1,
        GL_ADVANCED_ACCELERATION=2, GL_ADVANCED_FLICK=3, GL_ADVANCED_MODIFIERS=4,
-       GL_ADVANCED_HOLD_DISABLE=5, GL_ADVANCED_RECENTER=6 };
+       GL_ADVANCED_HOLD_DISABLE=5, GL_ADVANCED_RECENTER=6, GL_ADVANCED_CALIBRATION=7 };
 GL_API uint32_t GL_CALL gl_setting_advanced_group(const char* setting_id);
 /* Activator families and their inline thresholds/long-press blocking controls. Use to
  * group visible rows under a localized Activators heading in native menus. */
@@ -484,7 +484,7 @@ GL_API uint32_t GL_CALL gl_menu_setting_count(const gl_context*);
 GL_API int32_t GL_CALL gl_setting_at(const gl_context*,uint32_t index,gl_setting_info*);
 /* Per-view values require context.<id> keys. Former bare gyro/activation/flick
  * keys and ui.scale return GL_UNAVAILABLE; old metadata slots remain hidden for
- * ABI stability. calibration.automatic remains a shared numeric setting. */
+ * ABI stability. Automatic calibration controls are shared numeric settings. */
 GL_API int32_t GL_CALL gl_setting_get(const gl_context*,const char* id,double* value);
 /* get returns the inherited preference, independent of the current controller.
  * get_effective and menu metadata return the capability-adapted runtime value.

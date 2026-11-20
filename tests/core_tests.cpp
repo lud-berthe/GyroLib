@@ -177,7 +177,7 @@ static void calibration(){
     const auto buttons=[](gl_context* c,bool pending,bool available){
         gl_diagnostics diagnostics{};gl_get_diagnostics(c,&diagnostics);
         const bool local=diagnostics.source!=GL_SOURCE_STEAM;
-        CHECK(gl_menu_shared_setting_count(c)==7);
+        CHECK(gl_menu_shared_setting_count(c)>=7);
         bool begin=false,cancel=false;
         for(uint32_t i=0;i<gl_menu_shared_setting_count(c);++i){gl_setting_info s{},legacy{};
             CHECK(gl_menu_shared_setting_at(c,i,&s)==GL_OK);

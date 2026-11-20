@@ -102,8 +102,9 @@ int main(int argc,char** argv){
         for(int n=0;n<4;++n)frame(native);const auto off_height=child->ContentSize.y;
         for(int n=0;n<3;++n)child->StateStorage.SetBool(ImHashStr("advanced-open",0,ImHashStr(parents[n],0,table)),true);
         for(int n=0;n<4;++n)frame(native);
-        if(child->ContentSize.y!=off_height)std::cerr<<"Off content heights "<<off_height<<" / "<<child->ContentSize.y<<'\n';
-        require(child->ContentSize.y==off_height,"Off features rendered their child settings");
+        require(child->ContentSize.y>off_height,"Stabilization and deadzone must be available with smoothing off");
+        child->StateStorage.SetBool(open_id,false);frame(native);frame(native);
+        require(child->ContentSize.y==off_height,"Off acceleration or Flick rendered their child settings");
         const auto off_flick=ImHashStr("##value",0,ImHashStr(parents[2],0,table));
         const auto off_toggle=ImHashStr("###advanced-toggle",0,ImHashStr(parents[2],0,table));
         for(int n=0;n<60&&GImGui->NavId!=off_flick;++n)key(ImGuiKey_DownArrow,native);

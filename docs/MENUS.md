@@ -47,6 +47,9 @@ Use IDs for widget identity and `choice.value` for selection, never list indexes
 or translated labels. Skip invisible settings. Disable unavailable settings and
 omit unavailable choices from dropdowns. An unavailable current choice can still
 supply its preview label, as with Custom acceleration. Do not hard-code counts.
+Show shared `GL_ADVANCED_CALIBRATION` rows beside Automatic Calibration when
+visible. The Smoothing expander remains available while smoothing is Off because
+stabilization and the speed deadzone also work independently.
 
 Tabs have uint64 IDs equal to view ID + 1. There is no implicit camera or General
 tab. Use the tab and shared-setting APIs above for new menus. The flat

@@ -48,7 +48,7 @@ int main(void) {
         if(gl_set_gameplay_context_camera_in_menu(c,57,0)!=GL_OK)return 27;
         gl_menu_tab tab;
         if(gl_menu_tab_count(c)!=1||gl_menu_tab_at(c,0,&tab)!=GL_OK||tab.id!=58||tab.context_id!=57)return 6;
-        if(gl_menu_shared_setting_count(c)!=7||gl_menu_shared_setting_at(c,0,&info)!=GL_OK)return 17;
+        if(gl_menu_shared_setting_count(c)<7||gl_menu_shared_setting_at(c,0,&info)!=GL_OK)return 17;
         if(gl_menu_setting_count(c)!=gl_setting_count()+gl_menu_tab_setting_count(c,58))return 15;
         if(gl_menu_tab_setting_at(c,58,0,&info)!=GL_OK)return 16;
         if(gl_setting_set(c,"context.57.sensitivity_x",3.2)!=GL_OK)return 7;

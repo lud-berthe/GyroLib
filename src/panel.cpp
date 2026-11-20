@@ -43,7 +43,7 @@ static const char* base_key(const char* id){
 }
 static uint32_t control_group(const char* key,double value){
     if(!std::strcmp(key,"gyro.activation")&&int(value)==GL_HOLD_DISABLE)return GL_ADVANCED_HOLD_DISABLE;
-    if(!std::strcmp(key,"gyro.smoothing_ms")&&value>0)return GL_ADVANCED_SMOOTHING;
+    if(!std::strcmp(key,"gyro.smoothing_ms"))return GL_ADVANCED_SMOOTHING;
     if(!std::strcmp(key,"gyro.acceleration")&&value>0)return GL_ADVANCED_ACCELERATION;
     if(!std::strcmp(key,"flick.mode")&&int(value)!=GL_FLICK_OFF)return GL_ADVANCED_FLICK;
     if(!std::strcmp(key,"camera.recenter_button")&&value>0)return GL_ADVANCED_RECENTER;
@@ -72,6 +72,31 @@ static void draw_automatic_calibration(gl_panel* p,const gl_setting_info& settin
     }
     help(setting.description);
     ImGui::EndDisabled();ImGui::PopID();
+}
+static void draw_calibration_options(gl_panel* p,const std::vector<gl_setting_info>& options,float scale){
+    auto* c=p->context;
+    if(ImGui::Button("...###calibration-options"))ImGui::OpenPopup("Calibration options");
+    help(gl_text(c,"ui.advanced"));
+    if(ImGui::BeginPopup("Calibration options")){
+        for(const auto& option:options){
+            ImGui::PushID(option.id);
+            ImGui::BeginDisabled(!option.available);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(option.label);
+            help(option.description);
+            ImGui::SetNextItemWidth(260*scale);
+            int tick=int(std::round((option.value-option.minimum)/option.step));
+            const int last_tick=int(std::round((option.maximum-option.minimum)/option.step));
+            char format[64];
+            std::snprintf(format,sizeof(format),option.step>=1?"%.0f %s":"%.2f %s",option.value,option.unit);
+            if(ImGui::SliderInt("##value",&tick,0,last_tick,format,ImGuiSliderFlags_NoInput))
+                p->result=panel_setting(p,option.id,option.minimum+tick*option.step);
+            help(option.description);
+            ImGui::EndDisabled();
+            ImGui::PopID();
+        }
+        ImGui::EndPopup();
+    }
 }
 static void draw_header(gl_panel* p,float scale,bool& open){
     auto* c=p->context;
@@ -187,8 +212,11 @@ void GL_CALL gl_panel_draw(gl_panel* p,float width,float height,float dpi) try {
             help(gl_text(c,"ui.sensor.help"));
         }
         gl_setting_info automatic{},calibrate{},reset{},recommended{};
+        std::vector<gl_setting_info> calibration_options;
         for(uint32_t i=0;i<gl_menu_shared_setting_count(c);++i){gl_setting_info setting{};gl_menu_shared_setting_at(c,i,&setting);
             if(std::strcmp(setting.id,"calibration.automatic")==0)automatic=setting;
+            if(setting.visible&&gl_setting_advanced_group(setting.id)==GL_ADVANCED_CALIBRATION)
+                calibration_options.push_back(setting);
             if(setting.visible&&(std::strcmp(setting.id,"calibration.begin")==0||std::strcmp(setting.id,"calibration.cancel")==0))calibrate=setting;
             if(std::strcmp(setting.id,"settings.reset")==0)reset=setting;
             if(std::strcmp(setting.id,"settings.recommended")==0)recommended=setting;
@@ -198,8 +226,9 @@ void GL_CALL gl_panel_draw(gl_panel* p,float width,float height,float dpi) try {
         const bool steam_calibration=diagnostic.source==GL_SOURCE_STEAM;
         const float calibration_label=ImGui::CalcTextSize(gl_text(c,"ui.auto_calibration")).x;
         const float calibrate_width=ImGui::CalcTextSize(calibrate.label?calibrate.label:"").x+padding;
-        const bool label_above=!steam_calibration&&calibration_label+150*scale+calibrate_width+2*gap>content_width;
-        const float combo_width=content_width-calibrate_width-gap-(label_above?0:calibration_label+gap);
+        const float options_width=calibration_options.empty()?0:ImGui::CalcTextSize("...").x+padding+gap;
+        const bool label_above=!steam_calibration&&calibration_label+150*scale+calibrate_width+options_width+2*gap>content_width;
+        const float combo_width=content_width-calibrate_width-options_width-gap-(label_above?0:calibration_label+gap);
         const float half_width=(content_width-gap)*.5f;
         const bool stack_actions=recommended.visible&&std::max(ImGui::CalcTextSize(reset.label).x,
             ImGui::CalcTextSize(recommended.label).x)+padding>half_width;
@@ -431,6 +460,7 @@ void GL_CALL gl_panel_draw(gl_panel* p,float width,float height,float dpi) try {
         ImGui::Separator();
         if(steam_calibration){ImGui::AlignTextToFramePadding();ImGui::TextWrapped("%s",gl_text(c,"calibration.steamHelp"));}
         else {draw_automatic_calibration(p,automatic,combo_width,label_above);
+            if(!calibration_options.empty()){ImGui::SameLine();draw_calibration_options(p,calibration_options,scale);}
             ImGui::SameLine();draw_action(p,calibrate,calibrate_width);}
         if(!recommended.visible)ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x-action_width);
         draw_action(p,reset,action_width,true);

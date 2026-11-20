@@ -35,7 +35,11 @@ int main(int argc,char** argv)try{
             gl_set_gameplay_context_state(c,1,1,1);CHECK(gl_update(c,now,&host,&output)==GL_OK);};
         for(int i=0;i<25;++i)update();CHECK(output.source==GL_SOURCE_STEAM);
         auto visible=[&](const char* key){for(uint32_t i=0;i<gl_menu_setting_count(c);++i){gl_setting_info s{};CHECK(gl_setting_at(c,i,&s)==GL_OK);if(!std::strcmp(s.id,key))return s.visible!=0;}throw std::runtime_error("Missing setting");};
+        CHECK(gl_setting_set(c,"calibration.automatic",GL_CAL_ANYTIME)==GL_OK);
+        const char* options[]={"calibration.active_residual_limit_dps","calibration.active_time_constant_s",
+                               "calibration.manual_reference_limit_dps"};
         for(const auto* key:{"calibration.automatic","calibration.begin","calibration.cancel"})CHECK(!visible(key));
+        for(const auto* key:options)CHECK(!visible(key));
         auto* panel=gl_panel_create(c,nullptr);CHECK(panel);gl_set_panel_open(c,1);
         ImGui::CreateContext();auto& io=ImGui::GetIO();io.IniFilename=nullptr;io.DisplaySize=size;io.DeltaTime=1.f/60;
         io.Fonts->AddFontDefaultVector();CHECK(ImGui_ImplSDLRenderer3_Init(renderer));
@@ -58,6 +62,9 @@ int main(int argc,char** argv)try{
         CHECK(gl_setting_set(c,"context.1.camera.recenter_button",0)==GL_OK);draw();draw();CHECK(child->ContentSize.y==off_height);
         CHECK(gl_forget_endpoint(c,1)==GL_OK);endpoint.source=GL_SOURCE_SDL;CHECK(gl_register_endpoint(c,&endpoint)==GL_OK);
         draw();draw();CHECK(output.source==GL_SOURCE_SDL);CHECK(visible("calibration.automatic"));CHECK(visible("calibration.begin"));
+        for(const auto* key:options)CHECK(visible(key));
+        CHECK(gl_setting_set(c,"calibration.automatic",0)==GL_OK);
+        for(const auto* key:options)CHECK(!visible(key));
         CHECK(gl_setting_set(c,"context.1.camera.recenter_button",9)==GL_OK);draw();draw();
         if(argc>1&&std::strcmp(argv[1],"--capture")==0&&size.x==1600){
             SDL_SetRenderDrawColor(renderer,12,22,32,255);SDL_RenderClear(renderer);ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(),renderer);

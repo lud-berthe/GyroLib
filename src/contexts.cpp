@@ -14,7 +14,7 @@ uint32_t gl_context::winning_context() const {
 }
 Settings gl_context::effective_settings(uint32_t id) const {
     auto result=resolve_profile(context_settings,profile_links,id);
-    result[AutoCal]=settings[AutoCal];
+    for(auto field:calibration_settings)result[field]=settings[field];
     return result;
 }
 Settings gl_context::device_settings(uint32_t id) const {

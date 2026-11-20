@@ -29,7 +29,7 @@ struct PauseMenu {
     }
     static uint32_t control_group(const char* key,double value){
         if(!std::strcmp(key,"gyro.activation")&&int(value)==GL_HOLD_DISABLE)return GL_ADVANCED_HOLD_DISABLE;
-        if(!std::strcmp(key,"gyro.smoothing_ms")&&value>0)return GL_ADVANCED_SMOOTHING;
+        if(!std::strcmp(key,"gyro.smoothing_ms"))return GL_ADVANCED_SMOOTHING;
         if(!std::strcmp(key,"gyro.acceleration")&&value>0)return GL_ADVANCED_ACCELERATION;
         if(!std::strcmp(key,"flick.mode")&&int(value)!=GL_FLICK_OFF)return GL_ADVANCED_FLICK;
         if(!std::strcmp(key,"camera.recenter_button")&&value>0)return GL_ADVANCED_RECENTER;
@@ -214,9 +214,11 @@ struct PauseMenu {
     }
     float calibration(gl_context* c,float scale,bool measure=false){
         gl_setting_info automatic{},action{},reset{},recommended{};
+        std::vector<gl_setting_info> calibration_options;
         for(uint32_t i=0;i<gl_menu_shared_setting_count(c);++i){gl_setting_info s{};
             if(gl_menu_shared_setting_at(c,i,&s)!=GL_OK||!s.visible)continue;
             if(!std::strcmp(s.id,"calibration.automatic"))automatic=s;
+            else if(gl_setting_advanced_group(s.id)==GL_ADVANCED_CALIBRATION)calibration_options.push_back(s);
             else if(!std::strcmp(s.id,"settings.reset"))reset=s;
             else if(!std::strcmp(s.id,"settings.recommended"))recommended=s;
             else if(!std::strcmp(s.id,"calibration.begin")||!std::strcmp(s.id,"calibration.cancel"))action=s;
@@ -235,8 +237,9 @@ struct PauseMenu {
         const float padding=2*ImGui::GetStyle().FramePadding.x;
         const float label_width=ImGui::CalcTextSize(gl_text(c,"ui.auto_calibration")).x;
         const float calibrate_width=ImGui::CalcTextSize(action.label?action.label:"").x+padding;
-        const bool label_above=!steam_calibration&&label_width+150*scale+calibrate_width+2*gap>width;
-        const float combo_width=width-calibrate_width-gap-(label_above?0:label_width+gap);
+        const float options_width=calibration_options.empty()?0:ImGui::CalcTextSize("...").x+padding+gap;
+        const bool label_above=!steam_calibration&&label_width+150*scale+calibrate_width+options_width+2*gap>width;
+        const float combo_width=width-calibrate_width-options_width-gap-(label_above?0:label_width+gap);
         const float half_width=(width-gap)*.5f;
         const bool stack_actions=recommended.visible&&std::max(ImGui::CalcTextSize(reset.label).x,
             ImGui::CalcTextSize(recommended.label).x)+padding>half_width;
@@ -252,6 +255,19 @@ struct PauseMenu {
         if(steam_calibration)ImGui::TextWrapped("%s",gl_text(c,"calibration.steamHelp"));
         else {ImGui::TextUnformatted(gl_text(c,"ui.auto_calibration"));
             if(!label_above)ImGui::SameLine();widget(c,automatic,combo_width);
+            if(!calibration_options.empty()){
+                ImGui::SameLine();
+                if(ImGui::Button("...###calibration-options"))ImGui::OpenPopup("Calibration options");
+                help(gl_text(c,"ui.advanced"));
+                if(ImGui::BeginPopup("Calibration options")){
+                    for(const auto& option:calibration_options){
+                        ImGui::TextUnformatted(option.label);
+                        help(option.description);
+                        widget(c,option,260*scale);
+                    }
+                    ImGui::EndPopup();
+                }
+            }
             ImGui::SameLine();widget(c,action,calibrate_width);}
         if(!recommended.visible)ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x-action_width);
         ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(0,0,0,0));ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize,1.f);

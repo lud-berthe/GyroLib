@@ -147,6 +147,9 @@ ui.language=en
 ui.menu_key=F10
 ui.gamepad_menu_shortcut=1
 calibration.automatic=0
+calibration.active_residual_limit_dps=0.15
+calibration.active_time_constant_s=8
+calibration.manual_reference_limit_dps=0.5
 ```
 
 All gyro, activator, flick and camera preferences belong to a view, for example

@@ -8,6 +8,18 @@ new game's hook correctness or input-to-photon latency.
 
 ## Latest SDK results
 
+Release **1.4.0**, 21 November 2026: Windows x64 Release binaries pass
+**57/57** bundled-DLL, **57/57** full-static and **24/24** core-static tests.
+Fresh, relocated SDKs pass **28/28** independent C/C++, DX12 and public API
+checks. The installed demo smoke test also passes.
+
+The calibration regression reproduces a stationary 0.18 deg/s residual while
+gyro is active. Raising the residual limit to 0.25 deg/s and setting a two-second
+time constant lets the correction converge with or without a manual reference.
+Tests also cover the reference range, INI roundtrips and rejection of invalid
+values, stabilization with smoothing Off and the radial speed deadzone. Testing
+on the reported physical DualSense remains pending.
+
 Release **1.3.1**, 11 October 2026: Windows x64 Release binaries pass **57/57**
 bundled-DLL, **57/57** full-static and **24/24** core-static tests. Fresh SDKs
 were installed and relocated; their independent C/C++, DX12 and public API audit

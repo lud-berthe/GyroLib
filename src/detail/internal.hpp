@@ -37,7 +37,14 @@ using Settings=std::array<double,SettingCount>;
 struct ProfileLink {uint32_t parent{};std::bitset<SettingCount> overrides;};
 using Profiles=std::map<uint32_t,Settings>;
 using ProfileLinks=std::map<uint32_t,ProfileLink>;
-struct RecommendedSettings {Profiles profiles;ProfileLinks links;double calibration{};};
+constexpr std::array calibration_settings{AutoCal,AutoCalActiveLimit,AutoCalActiveTime,AutoCalReferenceLimit};
+constexpr bool advanced_calibration_setting(int field){
+    return field>=AutoCalActiveLimit&&field<=AutoCalReferenceLimit;
+}
+constexpr bool calibration_setting(int field){
+    return field==AutoCal||advanced_calibration_setting(field);
+}
+struct RecommendedSettings {Profiles profiles;ProfileLinks links;Settings settings;};
 Settings resolve_profile(const Profiles&,const ProfileLinks&,uint32_t);
 bool valid_links(const Profiles&,const ProfileLinks&);
 Settings defaults();

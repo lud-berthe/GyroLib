@@ -130,7 +130,9 @@ int main(int argc,char** argv){
             gl_setting_set(context.get(),parents[0],0);gl_setting_set(context.get(),parents[1],0);gl_setting_set(context.get(),parents[2],GL_FLICK_OFF);
             draw();draw();const auto off_height=child->ContentSize.y;
             for(int n=0;n<3;++n)child->StateStorage.SetBool(ImHashStr("advanced-open",0,child->GetID(parents[n])),true);
-            draw();draw();ok&=child->ContentSize.y==off_height;
+            draw();draw();ok&=child->ContentSize.y>off_height; // stabilization and deadzone still render
+            child->StateStorage.SetBool(ImHashStr("advanced-open",0,child->GetID(parents[0])),false);
+            draw();draw();ok&=child->ContentSize.y==off_height; // no acceleration or Flick details
             for(int n=0;n<60&&GImGui->NavId!=combo;++n)key(ImGuiKey_DownArrow);
             ok&=GImGui->NavId==combo;key(ImGuiKey_RightArrow);ok&=GImGui->NavId!=toggle;
             for(const auto* p:parents)child->StateStorage.SetBool(ImHashStr("advanced-open",0,child->GetID(p)),false);

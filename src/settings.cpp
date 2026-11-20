@@ -27,7 +27,7 @@ static void apply_acceleration_preset(Settings& values){
     values[FastSensY]=values[SensY]*gain[int(values[Acceleration])];
     values[SlowSpeed]=5;values[FastSpeed]=75;
 }
-bool profile_setting(int field){return field>=0&&field<SettingCount&&field!=AutoCal&&field!=UIScale&&field!=GyroContext&&field!=FlickContext;}
+bool profile_setting(int field){return field>=0&&field<SettingCount&&!calibration_setting(field)&&field!=UIScale&&field!=GyroContext&&field!=FlickContext;}
 std::string profile_key(uint32_t id,int field){
     return "context."+std::to_string(id)+"."+(field==SensX?"sensitivity_x":field==SensY?"sensitivity_y":definitions[field].id);
 }
@@ -121,13 +121,16 @@ int profile_field(uint32_t index){
     constexpr int first[]={Activation,Space,LocalAngle,LocalContribution,SensX,SensY,InvertX,InvertRoll,InvertY,
         Button,Trigger,TriggerThreshold,Touchpad,StickTouch,GripTouch,Stick,Threshold,BlockLongPress};
     for(int field:first)if(index--==0)return field;
-    for(int i=0;i<SettingCount;++i)if(profile_setting(i)&&std::find(std::begin(first),std::end(first),i)==std::end(first)){
+    for(int i=0;i<SettingCount;++i)if(i!=SteamMouse&&profile_setting(i)&&std::find(std::begin(first),std::end(first),i)==std::end(first)){
     // Place the replacement checkboxes before their axis/decay controls without
     // changing stored field ordinals. Retired bindings stay hidden at the end.
     const int field=i==TemporaryInvertButton?HoldInvert:i==TrackballButton?HoldTrackball:
         i==HoldInvert?TemporaryInvertButton:i==HoldTrackball?TrackballButton:i;
     if(index--==0)return field;
-    }return -1;}
+    }
+    // Keep the Steam Input routing row at the end of the view.
+    return index==0?SteamMouse:-1;
+}
 int resolved_field(const char* key){uint32_t id;int field;return context_setting(key,id,field)?field:setting_index(key);}
 bool valid_profile_value(int field,double value){
     return (field!=Activation||(value==double(GL_ALWAYS)||value==double(GL_HOLD)||value==double(GL_TOGGLE)||value==double(GL_HOLD_DISABLE)||value==double(GL_GYRO_OFF)))&&
@@ -137,7 +140,8 @@ bool valid_profile_value(int field,double value){
 extern "C" {
 uint32_t GL_CALL gl_setting_advanced_group(const char* id){
     const int field=resolved_field(id);
-    if(field==SmoothThreshold||field==Tightening)return GL_ADVANCED_SMOOTHING;
+    if(field==SmoothThreshold||field==Tightening||field==GyroDeadzone)return GL_ADVANCED_SMOOTHING;
+    if(advanced_calibration_setting(field))return GL_ADVANCED_CALIBRATION;
     if(field==RecenterMs)return GL_ADVANCED_RECENTER;
     if(field>=FastSensX&&field<=FastSpeed)return GL_ADVANCED_ACCELERATION;
     if(field==FlickMs||(field>=FlickStyle&&field<=FlickExponent)||(field>=FlickSmoothSpeed&&field<=FlickPadOuter))return GL_ADVANCED_FLICK;
@@ -149,11 +153,12 @@ uint32_t GL_CALL gl_setting_is_activator(const char* id){
     const int field=resolved_field(id);
     return (field>=Button&&field<=BlockLongPress)||field==Trigger||field==TriggerThreshold;
 }
-uint32_t GL_CALL gl_menu_shared_setting_count(const gl_context* c){return c?7:0;}
+static constexpr uint32_t shared_menu_fields[]={AutoCal,UIScale,SettingCount,SettingCount+1,SettingCount+2,
+    SettingCount+3,SettingCount+4,AutoCalActiveLimit,AutoCalActiveTime,AutoCalReferenceLimit};
+uint32_t GL_CALL gl_menu_shared_setting_count(const gl_context* c){return c?std::size(shared_menu_fields):0;}
 int32_t GL_CALL gl_menu_shared_setting_at(const gl_context* c,uint32_t index,gl_setting_info* out){
     if(!c||!out||index>=gl_menu_shared_setting_count(c))return GL_INVALID;
-    const uint32_t fields[]={AutoCal,UIScale,SettingCount,SettingCount+1,SettingCount+2,SettingCount+3,SettingCount+4};
-    return gl_setting_at(c,fields[index],out);
+    return gl_setting_at(c,shared_menu_fields[index],out);
 }
 uint32_t GL_CALL gl_menu_tab_count(const gl_context* c){return gl_gameplay_context_count(c);}
 int32_t GL_CALL gl_menu_tab_at(const gl_context* c,uint32_t index,gl_menu_tab* out){
@@ -231,8 +236,15 @@ int32_t GL_CALL gl_setting_at(const gl_context* c,uint32_t index,gl_setting_info
     }
     if(index==Trigger)out->visible=out->available=c->trigger_inputs().available!=0&&int(v[Activation])!=GL_ALWAYS;
     if(index==TriggerThreshold)out->visible=out->available=v[Trigger]!=0&&c->trigger_inputs().available!=0&&int(v[Activation])!=GL_ALWAYS;
-    if(index==AutoCal){auto* e=c->endpoint(c->active);out->visible=!e||e->info.source!=GL_SOURCE_STEAM;out->available=e&&e->info.source==GL_SOURCE_SDL&&
-        e->last_accel&&c->now>=e->last_accel&&c->now-e->last_accel<150000000;}
+    if(calibration_setting(index)){
+        const auto* e=c->endpoint(c->active);
+        out->visible=!e||e->info.source!=GL_SOURCE_STEAM;
+        if(index==AutoCalReferenceLimit)out->visible=out->visible&&v[AutoCal]!=0;
+        if(index==AutoCalActiveLimit||index==AutoCalActiveTime)
+            out->visible=out->visible&&v[AutoCal]==GL_CAL_ANYTIME;
+        out->available=out->visible&&e&&e->info.source==GL_SOURCE_SDL&&
+            e->last_accel&&c->now>=e->last_accel&&c->now-e->last_accel<150000000;
+    }
     const auto flick_inputs=c->flick_inputs();
     bool stick_hook=(c->host_capabilities&GL_HOST_NATIVE_STICK_SUPPRESSION)!=0;
     bool pad_hook=(c->host_capabilities&GL_HOST_NATIVE_TOUCHPAD_SUPPRESSION)!=0;
@@ -258,7 +270,7 @@ int32_t GL_CALL gl_setting_at(const gl_context* c,uint32_t index,gl_setting_info
     if(index==TrackballAxes||index==TrackballDecay)out->visible=out->available=hold_disable&&v[HoldTrackball]!=0;
     if(index==StickEffect)out->visible=out->available=0; // retired duplicate stick policy
     const auto group=gl_setting_advanced_group(d.id);
-    if((group==GL_ADVANCED_SMOOTHING&&!v[Smoothing])||
+    if((index==SmoothThreshold&&!v[Smoothing])||
        (group==GL_ADVANCED_ACCELERATION&&!v[Acceleration])||
        (group==GL_ADVANCED_FLICK&&flick_mode==GL_FLICK_OFF))out->visible=out->available=0;
     const bool camera_view=c->effective_output_target(context_id)!=GL_OUTPUT_CURSOR;
@@ -308,7 +320,7 @@ int32_t GL_CALL gl_setting_at(const gl_context* c,uint32_t index,gl_setting_info
 }
 int32_t GL_CALL gl_setting_get(const gl_context* c,const char* id,double* value) {
     if(!c||!value)return GL_INVALID;int index=setting_index(id);
-    if(index>=0){if(index!=AutoCal)return GL_UNAVAILABLE;*value=c->settings[index];return GL_OK;}
+    if(index>=0){if(!calibration_setting(index))return GL_UNAVAILABLE;*value=c->settings[index];return GL_OK;}
     uint32_t context_id;int field;
     if(!context_setting(id,context_id,field)||!c->gameplay_contexts.count(context_id))return GL_INVALID;
     const auto saved=c->effective_settings(context_id);
@@ -373,11 +385,9 @@ int32_t GL_CALL gl_setting_set(gl_context* c,const char* id,double value) try {
         return save_change(c);
     }
     const auto& d=definitions[index];if(value<d.min||value>d.max)return GL_INVALID;
-    if(index!=AutoCal)return GL_UNAVAILABLE; // per-view values require context.<id> keys
-    if(context_selector(index)&&value!=std::floor(value))return GL_INVALID;
+    if(!calibration_setting(index))return GL_UNAVAILABLE; // per-view values require context.<id> keys
     value=quantize(index,value);if(c->settings[index]==value)return GL_OK;
-    c->settings[index]=value;c->emit(GL_EVENT_SETTING,index,0,value,id);
-    if(index==Activation||(index>=Button&&index<=BlockLongPress)){for(auto& g:c->long_press_blockers)g.cancel();c->controls_primed=false;}
+    c->settings[index]=value;c->emit(GL_EVENT_SETTING,index,0,value,d.id);
     return save_change(c);
 } catch (...) {return GL_LIMIT;}
 uint32_t GL_CALL gl_choice_count(const char* id) {
@@ -497,7 +507,7 @@ void GL_CALL gl_reset_settings(gl_context* c) try {
     const auto before=c->profile_snapshot();
     {
     SettingsBatch batch(c);
-    gl_setting_set(c,definitions[AutoCal].id,definitions[AutoCal].def);
+    for(auto field:calibration_settings)gl_setting_set(c,definitions[field].id,definitions[field].def);
     c->profile_links.clear();
     for(auto& [id,profile]:c->context_settings)profile=defaults(); // including retired modes
     c->profiles_changed(before);c->emit(GL_EVENT_CONTEXT,6);
@@ -577,7 +587,7 @@ int32_t GL_CALL gl_load_settings(gl_context* c,const char* path) try {
         if(it->second!="0"&&it->second!="1")return GL_INVALID;
         gamepad_menu_shortcut=it->second=="1";values.erase(it);
     }
-    double automatic_calibration=c->settings[AutoCal];
+    auto shared=c->settings;
     std::map<uint64_t,ManualCalibration> calibrations;
     auto profiles=c->context_settings;std::map<std::string,std::string> unknown;
     auto links=c->profile_links;std::map<uint32_t,uint32_t> parents;
@@ -618,10 +628,10 @@ int32_t GL_CALL gl_load_settings(gl_context* c,const char* path) try {
         }
         int field_index=setting_index(key.c_str());
         if(field_index<0){unknown[key]=text;continue;}
-        if(field_index!=AutoCal)return GL_INVALID; // settings always belong to a named view
-        double number;const auto& d=definitions[AutoCal];
+        if(!calibration_setting(field_index))return GL_INVALID; // per-view fields require a named view
+        double number;const auto& d=definitions[field_index];
         if(!parse_number(text,number)||number<d.min||number>d.max)return GL_INVALID;
-        automatic_calibration=quantize(AutoCal,number);
+        shared[field_index]=quantize(field_index,number);
     }
     for(const auto& [id,parent]:parents){profiles[id]=defaults();links.erase(id);}
     for(const auto& [id,fields]:edits){profiles[id]=defaults();links.erase(id);}
@@ -668,7 +678,7 @@ int32_t GL_CALL gl_load_settings(gl_context* c,const char* path) try {
     // Transaction: no setting changes on malformed or newer files.
     const auto before=c->profile_snapshot();
     SettingsBatch batch(c);
-    gl_setting_set(c,definitions[AutoCal].id,automatic_calibration);
+    for(auto field:calibration_settings)gl_setting_set(c,definitions[field].id,shared[field]);
     c->context_settings=std::move(profiles);c->profile_links=std::move(links);
     c->profiles_changed(before);c->emit(GL_EVENT_CONTEXT,6);
     gl_set_language(c,language.c_str());
@@ -702,7 +712,7 @@ static int32_t write_settings(gl_context* c,const char* path) try {
     if(c->menu_key)file<<'F'<<c->menu_key;
     file<<"\n# Back + Start opens the panel. Set 0 to disable.\nui.gamepad_menu_shortcut="<<int(c->gamepad_menu_shortcut);
     file<<"\nui.language="<<c->language<<'\n'<<std::setprecision(12);
-    file<<"calibration.automatic="<<c->settings[AutoCal]<<'\n';
+    for(auto field:calibration_settings)file<<definitions[field].id<<'='<<c->settings[field]<<'\n';
     if(!c->manual_calibrations.empty())file<<"\n# Per-sensor manual calibration: bias x,y,z (deg/s), noise variance.\n";
     for(const auto& [identity,measurement]:c->manual_calibrations){
         const auto b=measurement.bias;

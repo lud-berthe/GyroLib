@@ -97,7 +97,7 @@ static void conditional_menu(){
         for(uint32_t i=0;i<gl_menu_tab_setting_count(f.c,2);++i){gl_setting_info value{};gl_menu_tab_setting_at(f.c,2,i,&value);if(id==value.id)return value;}
         throw std::runtime_error("Missing menu field");};
     CHECK(!info("gyro.look_stick_effect").visible);
-    CHECK(!info("gyro.smoothing_threshold_dps").visible&&!info("gyro.tightening_dps").visible);
+    CHECK(!info("gyro.smoothing_threshold_dps").visible&&info("gyro.tightening_dps").visible&&info("gyro.speed_deadzone_dps").visible);
     f.set("gyro.smoothing_ms",25);CHECK(info("gyro.smoothing_threshold_dps").visible&&info("gyro.tightening_dps").visible);
     f.set("gyro.acceleration",0);CHECK(!info("gyro.fast_sensitivity_x").visible);
     f.set("gyro.acceleration",1);CHECK(info("gyro.fast_sensitivity_x").visible);
@@ -307,6 +307,7 @@ static void all_menu_options(){
                     f.set("gyro.activation",activation);f.set("gyro.space",space);
                     f.set("flick.mode",mode);f.set("flick.style",style);collect(2);
                 }
+    CHECK(gl_setting_set(f.c,"calibration.automatic",GL_CAL_ANYTIME)==GL_OK);
     collect(GL_TAB_GENERAL);
     const std::set<std::string> retired={"gyro.enabled","gyro.context","flick.context","ui.scale",
         "flick.smoothing_threshold_degrees","gyro.temporary_invert_button","gyro.trackball_button","gyro.look_stick_effect"};
@@ -315,7 +316,7 @@ static void all_menu_options(){
         if(s.type==GL_SETTING_ACTION||retired.count(s.id))continue;
         const std::string suffix=!std::strcmp(s.id,"gyro.sensitivity_x")?"sensitivity_x":
             !std::strcmp(s.id,"gyro.sensitivity_y")?"sensitivity_y":s.id;
-        expected.insert(suffix=="calibration.automatic"?suffix:"context.1."+suffix);
+        expected.insert(suffix.starts_with("calibration.")?suffix:"context.1."+suffix);
     }
     for(const auto& id:expected)if(!exposed.count(id))throw std::runtime_error("Unreachable menu option: "+id);
     CHECK(exposed.size()==expected.size());

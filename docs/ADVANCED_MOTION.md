@@ -21,7 +21,7 @@ presentation.
 ## Gyro pipeline
 
 ```text
-calibrated angular velocity → gyro space → smoothing → tightening
+calibrated angular velocity → gyro space → smoothing → speed deadzone → tightening
 → acceleration/sensitivity → inversion → optional zoom scale → angular deltas
 ```
 
@@ -124,9 +124,9 @@ With a manual reference, automatic stillness is assessed relative to its bias.
 The noise limit follows the measured RMS (1.25 times, bounded between 0.9 and
 3 deg/s); acceleration and gravity-direction checks still apply. Before each
 automatic adjustment, stable windows are averaged for at least one second and
-until the estimated mean uncertainty is at most 0.05 deg/s. Corrections stay
-within 0.5 deg/s of the manual bias and, during active gyro use, within 0.15 deg/s
-of the current correction. Accepted averages are blended with the usual two- or
+until the estimated mean uncertainty is at most 0.05 deg/s. By default, corrections
+stay within 0.5 deg/s of the manual bias and, during active gyro use, within
+0.15 deg/s of the current correction. Accepted averages are blended with the usual two- or
 eight-second time constant. Each accepted/rejected estimate starts a new batch.
 Automatic refinements are session-only: they never overwrite the saved manual
 measurement. The host calibration veto applies to this path too.
@@ -134,15 +134,31 @@ measurement. The host calibration veto applies to this path too.
 Large impulses cancel collection immediately; stream gaps clear its window.
 Without a manual reference, automatic bias correction starts after one second
 of accepted windows, with a two-second time constant outside active gyro use.
-During active use outside a safe menu,
-only residual drift within 0.15 deg/s is accepted, with an eight-second constant.
+During active use outside a safe menu, the defaults accept residual drift
+within 0.15 deg/s of the current correction, with an eight-second time constant.
+In the panel, use the advanced button next to Automatic Calibration. The shared
+settings apply to all views:
+
+| INI key | Default | Range |
+|---|---:|---:|
+| calibration.active_residual_limit_dps | 0.15 deg/s | 0..2 deg/s |
+| calibration.active_time_constant_s | 8 s | 1..30 s |
+| calibration.manual_reference_limit_dps | 0.5 deg/s | 0..2 deg/s |
+
+The first two settings apply during active gyro use in Anytime mode. The
+reference range applies in either automatic mode when a manual reference
+exists. Raising either limit can let automatic calibration absorb very slow
+intentional turns. The stillness and measurement checks still apply, and
+automatic refinements never replace the manual measurement on disk.
+
 The host can veto automatic learning for one update with
 `gl_set_auto_calibration_allowed(context, 0)`; the veto then clears and does not
 cancel manual calibration.
 
 These checks do not add smoothing or a dead zone to output. Very slow intentional
-rotation remains indistinguishable from bias in some conditions. Larger drift
-requires manual calibration or a safe idle interval. Steam Input samples receive
+rotation remains indistinguishable from bias in some conditions. A safe idle
+interval can help with drift beyond the active limit. A new manual measurement
+can correct drift beyond the configured reference range. Steam Input samples receive
 no local bias correction; its internal calibration remains outside this API.
 While Steam Input is the active motion source, the menu hides both calibration
 controls and displays "Calibration is managed by Steam Input." in their place.
@@ -151,8 +167,7 @@ Returning to SDL restores the controls and the saved automatic policy.
 ## Smoothing
 
 `gyro.smoothing_ms` is an exponential time constant: 0..500 ms in 5 ms steps.
-Zero bypasses both smoothing and its small-movement stabilization. A step reaches
-about 63% after one time constant; this is not a fixed delay or a sample count.
+Zero bypasses smoothing. A step reaches about 63% after one time constant.
 
 The coefficient is `-expm1(-dt/tau)`. The processor integrates the analytic
 interval mean to conserve displacement at variable sample rates.
@@ -162,14 +177,20 @@ the two paths blend continuously. The filter continues draining during fast moti
 
 `gyro.tightening_dps` defaults to 0, range 0..10 deg/s. Below a nonzero threshold,
 it scales the vector by speed/threshold. It intentionally reduces small movement
-without imposing a hard dead zone. Its saved value is retained while smoothing
-is Off and resumes when smoothing is enabled.
+without imposing a hard dead zone. It also works when smoothing is Off.
+
+`gyro.speed_deadzone_dps` defaults to 0 (Off), range 0..10 deg/s. A nonzero
+threshold discards projected yaw and pitch whose combined speed is at or below
+the threshold, after smoothing and before stabilization and sensitivity. Speeds
+above the threshold pass through without subtracting the threshold. This setting
+does not change gyro samples used for calibration, fusion or diagnostics.
+Both settings are available under the Smoothing expander even when it is Off.
 
 ## Acceleration
 
 The main X/Y sensitivities are absolute ratios, from 0 to 20. When acceleration
 is enabled they describe slow movement; fast X/Y sensitivities range from 0 to 60
-in 0.05 steps. Speed is measured after smoothing and tightening.
+in 0.05 steps. Speed is measured after smoothing, the speed deadzone and tightening.
 
 | Preset | Fast sensitivity | Start / full speed |
 |---|---|---|

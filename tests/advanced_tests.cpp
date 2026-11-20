@@ -81,12 +81,12 @@ static void world_gravity_direction(){
 }
 static void tightening_and_acceleration(){
     Fixture f;f.set("gyro.tightening_dps",10);
-    auto out=f.tick({3,4,0});near(out.yaw_degrees,-.04);near(out.pitch_degrees,.03);
-    CHECK(!f.info("gyro.tightening_dps").visible);
+    auto out=f.tick({3,4,0});near(out.yaw_degrees,-.02);near(out.pitch_degrees,.015);
+    CHECK(f.info("gyro.tightening_dps").visible);
     f.set("gyro.smoothing_ms",50);f.set("gyro.smoothing_threshold_dps",0);
     CHECK(f.info("gyro.tightening_dps").visible);
     out=f.tick({3,4,0});near(out.yaw_degrees,-.02);near(out.pitch_degrees,.015);
-    f.set("gyro.smoothing_ms",0);out=f.tick({3,4,0});near(out.yaw_degrees,-.04);near(out.pitch_degrees,.03);
+    f.set("gyro.smoothing_ms",0);out=f.tick({3,4,0});near(out.yaw_degrees,-.02);near(out.pitch_degrees,.015);
     near(f.info("gyro.tightening_dps").value,10);
     f.set("gyro.smoothing_ms",50);
     CHECK(f.tick({0,.001f,0}).yaw_degrees<0); // no cutoff
@@ -95,6 +95,14 @@ static void tightening_and_acceleration(){
     f.set("sensitivity_y",2);f.set("gyro.slow_threshold_dps",10);f.set("gyro.fast_threshold_dps",50);
     near(f.tick({0,30,0}).yaw_degrees,-.9);near(f.tick({30,0,0}).pitch_degrees,1.5);
     f.set("gyro.fast_threshold_dps",10);near(f.tick({0,10,0}).yaw_degrees,-.1);near(f.tick({0,30,0}).yaw_degrees,-1.5);
+    Fixture deadzone;
+    deadzone.set("gyro.speed_deadzone_dps",.5);
+    near(deadzone.tick({0,.49f,0}).yaw_degrees,0);
+    near(deadzone.tick({.5f,0,0}).pitch_degrees,0);
+    // The threshold uses the vector's speed, not each axis independently.
+    out=deadzone.tick({.4f,.4f,0});near(out.yaw_degrees,-.004);near(out.pitch_degrees,.004);
+    deadzone.set("gyro.speed_deadzone_dps",0);
+    near(deadzone.tick({0,.1f,0}).yaw_degrees,-.001);
     Fixture filtered;filtered.set("gyro.smoothing_ms",100);filtered.set("gyro.smoothing_threshold_dps",100);filtered.set("gyro.acceleration",3);
     // At first sample the filtered speed is <5 dps, so the raw 30 dps cannot amplify it.
     near(filtered.tick({0,30,0}).yaw_degrees,-30*(.01-.1*(1-std::exp(-.1))));
@@ -413,8 +421,8 @@ static void metadata_and_persistence(){
     const auto file=std::filesystem::temp_directory_path()/"gyrolib-advanced-persistence.ini";
     {std::ofstream out(file);out<<"schema=0.2.0\nui.menu_key=\ncontext.1.sensitivity_x=7.2\ncontext.1.gyro.smoothing_ms=85\ncustom.host=keep\n";}
     CHECK(gl_load_settings(f.c,file.string().c_str())==GL_OK);near(f.info("sensitivity_x").value,7.2);near(f.info("gyro.smoothing_ms").value,85);
-    f.set("gyro.tightening_dps",.35);f.set("gyro.space",GL_SPACE_PLAYER_LEAN);f.set("flick.snap",2);f.set("camera.recenter_duration_ms",315);
-    Fixture loaded;CHECK(gl_load_settings(loaded.c,file.string().c_str())==GL_OK);near(loaded.info("gyro.tightening_dps").value,.35);near(loaded.info("flick.snap").value,2);
+    f.set("gyro.speed_deadzone_dps",.25);f.set("gyro.tightening_dps",.35);f.set("gyro.space",GL_SPACE_PLAYER_LEAN);f.set("flick.snap",2);f.set("camera.recenter_duration_ms",315);
+    Fixture loaded;CHECK(gl_load_settings(loaded.c,file.string().c_str())==GL_OK);near(loaded.info("gyro.tightening_dps").value,.35);near(loaded.info("gyro.speed_deadzone_dps").value,.25);near(loaded.info("flick.snap").value,2);
     near(loaded.info("camera.recenter_duration_ms").value,315);
     CHECK(gl_get_menu_key(loaded.c)==0);std::ifstream in(file);std::string data((std::istreambuf_iterator<char>(in)),{});CHECK(data.find("schema=0.2.0")!=std::string::npos&&data.find("custom.host=keep")!=std::string::npos);
     in.close();std::filesystem::remove(file);

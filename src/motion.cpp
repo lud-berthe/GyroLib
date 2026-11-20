@@ -87,7 +87,7 @@ void Motion::process(const gl_sample& s,const Settings& v,bool steam,bool menu,b
     // Larger errors remain correctable in menus, while disabled, or manually.
     const bool guarded=active&&!menu;
     if(!referenced&&guarded&&window.complete&&std::hypot(window.gyro.x-diagnostics.bias.x,
-        window.gyro.y-diagnostics.bias.y,window.gyro.z-diagnostics.bias.z)>.15)auto_allowed=false;
+        window.gyro.y-diagnostics.bias.y,window.gyro.z-diagnostics.bias.z)>v[AutoCalActiveLimit])auto_allowed=false;
     if (!auto_allowed || stillness_.moving()) still_time_=auto_error_=0;
     else if (window.complete && window.stable) {
         still_time_+=window.seconds;
@@ -99,8 +99,8 @@ void Motion::process(const gl_sample& s,const Settings& v,bool steam,bool menu,b
             const auto distance=[&](gl_vec3 b){return std::hypot(auto_mean_.x-b.x,auto_mean_.y-b.y,auto_mean_.z-b.z);};
             // A manual reference permits only bounded residual learning. Noise
             // is averaged before this check; it must not widen the motion gate.
-            if(!referenced||(distance(manual_reference_->bias)<=.5&&(!guarded||distance(bias)<=.15))){
-                float alpha=static_cast<float>(-std::expm1(-(referenced?still_time_:window.seconds)/(guarded?8:2)));
+            if(!referenced||(distance(manual_reference_->bias)<=v[AutoCalReferenceLimit]&&(!guarded||distance(bias)<=v[AutoCalActiveLimit]))){
+                float alpha=static_cast<float>(-std::expm1(-(referenced?still_time_:window.seconds)/(guarded?v[AutoCalActiveTime]:2)));
                 bias.x+=alpha*(auto_mean_.x-bias.x); bias.y+=alpha*(auto_mean_.y-bias.y); bias.z+=alpha*(auto_mean_.z-bias.z);
                 fusion_.SetCalibrationOffset(bias.x,bias.y,bias.z,1); diagnostics.bias=bias;
             }
@@ -154,7 +154,10 @@ void Motion::process(const gl_sample& s,const Settings& v,bool steam,bool menu,b
     double x=-yaw,y=pitch;
     filter_.apply(x,y,dt,v[Smoothing]/1000,v[SmoothThreshold]);
     double speed=std::hypot(x,y);
-    if(v[Smoothing]>0&&v[Tightening]>0&&speed<v[Tightening]){
+    if(speed<=v[GyroDeadzone]){
+        x=y=speed=0;
+    }
+    if(v[Tightening]>0&&speed<v[Tightening]){
         x*=speed/v[Tightening];y*=speed/v[Tightening];speed=std::hypot(x,y);
     }
     // Acceleration consumes the filtered/tightened velocity, never raw sensor noise.

@@ -2,6 +2,33 @@
 
 [Documentation](INDEX.md) / Maintenance
 
+## 1.4.0 — 21 November 2026
+
+- Automatic calibration now lets you tune the active residual limit, the time
+  constant during play and the allowed movement away from a completed manual
+  calibration. Defaults are 0.15 deg/s, 8 s and 0.5 deg/s. In the panel or demo,
+  select Any time and open the three-dot button beside Automatic calibration.
+- Small Movement Stabilization also works when Smoothing is Off. Any existing
+  nonzero stabilization setting now takes effect with smoothing off.
+- The optional Gyro Speed Deadzone cuts camera or cursor movement at or below a
+  chosen speed. It defaults to Off and is set per view. Both movement controls
+  are under the Smoothing expander.
+
+A simulated stationary sensor reproduced the reported 0.18 deg/s residual. A
+higher limit allowed automatic calibration to follow it. The affected physical
+DualSense still needs validation. Raising calibration limits can absorb very
+slow intentional turns. [Issue #3](https://github.com/lud-berthe/GyroLib/issues/3)
+and [motion settings](ADVANCED_MOTION.md#calibration).
+
+Validation: **57/57** bundled DLL, **57/57** full-static and **24/24** core-static
+tests pass, plus **28/28** installed SDK checks and the demo smoke test.
+
+### Update
+
+Close the host and replace `gyrolib.dll`. Keep `gyrolib.ini` and the license
+notices. ABI 1 and INI schema 0.2.0 are retained. The Windows x64 release
+includes the DLL, SDK, demo and SHA-256 checksums.
+
 ## 1.3.1 — 11 October 2026
 
 - Fix [#2](https://github.com/lud-berthe/GyroLib/issues/2): loading an INI with
